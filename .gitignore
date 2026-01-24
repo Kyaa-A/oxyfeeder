@@ -21,3 +21,6 @@
 
 ## Other
 **/.DS_Store
+
+## APK builds (upload to Drive instead)
+*.apk

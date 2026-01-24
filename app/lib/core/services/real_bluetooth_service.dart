@@ -17,6 +17,7 @@ class RealBluetoothService implements BluetoothServiceInterface {
   static const String deviceName = 'OxyFeeder';
   static const String serviceUuid = '0000abcd-0000-1000-8000-00805f9b34fb';
   static const String characteristicUuid = '0000abce-0000-1000-8000-00805f9b34fb';
+  static const String commandCharacteristicUuid = '0000abcf-0000-1000-8000-00805f9b34fb';
 
   // Stream controller for status updates
   final StreamController<OxyFeederStatus> _statusStreamController =
@@ -28,6 +29,7 @@ class RealBluetoothService implements BluetoothServiceInterface {
   // Connection state
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _dataCharacteristic;
+  BluetoothCharacteristic? _commandCharacteristic;  // For sending commands
   StreamSubscription<List<int>>? _notificationSubscription;
   StreamSubscription<BluetoothConnectionState>? _connectionStateSubscription;
   StreamSubscription<List<ScanResult>>? _scanSubscription;
@@ -245,21 +247,25 @@ class RealBluetoothService implements BluetoothServiceInterface {
         return false;
       }
 
-      // Find data characteristic
+      // Find data characteristic and command characteristic
       print('RealBluetoothService: Found ${targetService.characteristics.length} characteristics:');
       for (final characteristic in targetService.characteristics) {
         print('RealBluetoothService:   Characteristic: ${characteristic.uuid}');
         final uuid = characteristic.uuid.toString().toLowerCase();
-        // Check both full UUID and short UUID (abce)
+        // Check for data characteristic (abce)
         if (uuid == characteristicUuid.toLowerCase() || uuid.contains('abce')) {
           _dataCharacteristic = characteristic;
           print('RealBluetoothService: Found data characteristic: $uuid');
-          break;
+        }
+        // Check for command characteristic (abcf)
+        if (uuid == commandCharacteristicUuid.toLowerCase() || uuid.contains('abcf')) {
+          _commandCharacteristic = characteristic;
+          print('RealBluetoothService: Found command characteristic: $uuid');
         }
       }
 
       if (_dataCharacteristic == null) {
-        print('RealBluetoothService: Characteristic not found');
+        print('RealBluetoothService: Data characteristic not found');
         await device.disconnect();
         _updateState(BleConnectionState.characteristicNotFound);
         return false;
@@ -368,7 +374,53 @@ class RealBluetoothService implements BluetoothServiceInterface {
     await _connectedDevice?.disconnect();
     _connectedDevice = null;
     _dataCharacteristic = null;
+    _commandCharacteristic = null;
     _updateState(BleConnectionState.disconnected);
+  }
+
+  // ==========================================================================
+  // COMMAND SENDING METHODS (App -> ESP32 -> Arduino)
+  // ==========================================================================
+
+  /// Send a raw command to Arduino via ESP32
+  Future<bool> sendCommand(String command) async {
+    if (_commandCharacteristic == null) {
+      print('RealBluetoothService: Command characteristic not available');
+      return false;
+    }
+    
+    try {
+      print('RealBluetoothService: Sending command: $command');
+      await _commandCharacteristic!.write(
+        utf8.encode(command),
+        withoutResponse: true,
+      );
+      print('RealBluetoothService: Command sent successfully');
+      return true;
+    } catch (e) {
+      print('RealBluetoothService: Failed to send command: $e');
+      return false;
+    }
+  }
+
+  /// Set the SMS phone number for alerts
+  Future<bool> setPhoneNumber(String phoneNumber) async {
+    return sendCommand('PHONE:$phoneNumber');
+  }
+
+  /// Trigger a manual feeding
+  Future<bool> triggerManualFeed({int durationSeconds = 5}) async {
+    return sendCommand('FEED:$durationSeconds');
+  }
+
+  /// Send a test SMS to verify the GSM module
+  Future<bool> sendTestSms() async {
+    return sendCommand('TEST_SMS:1');
+  }
+
+  /// Request the current phone number from Arduino
+  Future<bool> requestPhoneNumber() async {
+    return sendCommand('GET_PHONE:1');
   }
 
   @override

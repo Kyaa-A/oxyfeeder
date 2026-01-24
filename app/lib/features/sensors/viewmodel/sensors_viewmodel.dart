@@ -9,24 +9,15 @@ class SensorsViewModel extends ChangeNotifier {
   StreamSubscription<OxyFeederStatus>? _statusSubscription;
 
   OxyFeederStatus _currentStatus = const OxyFeederStatus(
-    dissolvedOxygen: 6.5,
-    feedLevel: 75,
-    batteryStatus: 88,
+    dissolvedOxygen: 0.0,
+    feedLevel: 0,
+    batteryStatus: 0,
   );
 
-  final List<FlSpot> _historicalDoData = <FlSpot>[
-    const FlSpot(0, 6.0),
-    const FlSpot(1, 6.3),
-    const FlSpot(2, 5.8),
-    const FlSpot(3, 6.5),
-    const FlSpot(4, 7.2),
-    const FlSpot(5, 7.0),
-    const FlSpot(6, 6.8),
-  ];
+  final List<FlSpot> _historicalDoData = <FlSpot>[];
 
-  final String _lastCalibratedDate = '2025-10-26';
-  final String _feedLoadCellRawValue = '12345';
-  final String _batteryVoltage = '12.8V';
+  // Timestamp of last update
+  DateTime _lastUpdate = DateTime.now();
 
   SensorsViewModel(this._bluetoothService) {
     _statusSubscription = _bluetoothService.statusStream.listen((event) {
@@ -38,12 +29,30 @@ class SensorsViewModel extends ChangeNotifier {
   // Getters
   OxyFeederStatus get currentStatus => _currentStatus;
   List<FlSpot> get historicalDoData => List<FlSpot>.unmodifiable(_historicalDoData);
-  String get lastCalibratedDate => _lastCalibratedDate;
-  String get feedLoadCellRawValue => _feedLoadCellRawValue;
-  String get batteryVoltage => _batteryVoltage;
+  DateTime get lastUpdate => _lastUpdate;
+  
+  /// Calculated battery voltage from percentage (12V nominal, 10.5V cutoff, 14.4V full)
+  String get batteryVoltage {
+    // Map 0-100% to 10.5V - 14.4V range
+    final voltage = 10.5 + (_currentStatus.batteryStatus / 100.0) * (14.4 - 10.5);
+    return '${voltage.toStringAsFixed(1)}V';
+  }
+  
+  /// Feed level raw value (simulated from percentage)
+  String get feedLoadCellRawValue {
+    // Simulate raw ADC value based on percentage (0-100% -> 0-4095)
+    final rawValue = (_currentStatus.feedLevel / 100.0 * 4095).toInt();
+    return rawValue.toString();
+  }
+
+  /// Check if we're receiving live data
+  bool get isReceivingData {
+    return DateTime.now().difference(_lastUpdate).inSeconds < 10;
+  }
 
   void updateLiveData(OxyFeederStatus newStatus) {
     _currentStatus = newStatus;
+    _lastUpdate = DateTime.now();
     notifyListeners();
   }
 
@@ -68,5 +77,3 @@ class SensorsViewModel extends ChangeNotifier {
     super.dispose();
   }
 }
-
-

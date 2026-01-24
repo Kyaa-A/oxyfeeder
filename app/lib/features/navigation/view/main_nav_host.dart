@@ -32,6 +32,12 @@ class _MainNavHostState extends State<MainNavHost> {
         onTap: (int index) {
           setState(() => _currentIndex = index);
         },
+        backgroundColor: const Color(0xFF0F172A), // Slate 900
+        selectedItemColor: const Color(0xFF14B8A6), // Teal 500
+        unselectedItemColor: Colors.white38,
+        type: BottomNavigationBarType.fixed,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+        unselectedLabelStyle: const TextStyle(fontSize: 11),
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard_outlined),
