@@ -22,14 +22,12 @@ class OxyFeederStatus {
   }
 
   factory OxyFeederStatus.fromJson(Map<String, dynamic> json) {
-    final doValue = json['do'];
-    final feedValue = json['feed'];
-    final batteryValue = json['battery'];
-
+    // Safely parse JSON with null checks and fallback defaults
+    // This prevents crashes if ESP32 sends malformed/incomplete data
     return OxyFeederStatus(
-      dissolvedOxygen: (doValue as num).toDouble(),
-      feedLevel: (feedValue as num).toInt(),
-      batteryStatus: (batteryValue as num).toInt(),
+      dissolvedOxygen: (json['do'] as num?)?.toDouble() ?? 0.0,
+      feedLevel: (json['feed'] as num?)?.toInt() ?? 0,
+      batteryStatus: (json['battery'] as num?)?.toInt() ?? 0,
     );
   }
 }

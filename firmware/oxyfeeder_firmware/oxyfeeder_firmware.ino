@@ -148,6 +148,20 @@ unsigned long lastDisplayUpdate = 0;
 unsigned long lastJsonSend = 0;
 bool lastFeedingDone = false;  // Prevents repeated feeding in same minute
 
+// Non-blocking feeding state machine
+enum FeedingState {
+  FEEDING_IDLE,
+  FEEDING_GATE_OPENING,
+  FEEDING_DISPENSING,
+  FEEDING_GATE_CLOSING,
+  FEEDING_COMPLETE
+};
+
+FeedingState feedingState = FEEDING_IDLE;
+unsigned long feedingStartTime = 0;
+unsigned long feedingDuration = 0;
+unsigned long stateTransitionTime = 0;
+
 // SMS cooldown to prevent spam
 unsigned long lastSmsSent = 0;
 const unsigned long SMS_COOLDOWN = 300000;  // 5 minutes between SMS
@@ -180,6 +194,7 @@ float readWeight();
 int readFeedLevel();
 
 void dispenseFeed(int seconds);
+void updateFeedingState();  // Non-blocking feeding state machine
 void openGate();
 void closeGate();
 void triggerAlarm();
@@ -287,13 +302,16 @@ void loop() {
     sendJsonToESP32();
   }
   
-  // 4. CHECK FEEDING SCHEDULE
+  // 4. UPDATE NON-BLOCKING FEEDING STATE
+  updateFeedingState();
+
+  // 5. CHECK FEEDING SCHEDULE
   checkFeedingSchedule();
-  
-  // 5. CHECK SAFETY ALERTS
+
+  // 6. CHECK SAFETY ALERTS
   checkSafetyAlerts();
-  
-  // 6. PROCESS INCOMING COMMANDS FROM APP
+
+  // 7. PROCESS INCOMING COMMANDS FROM APP
   processIncomingCommands();
   
   // Small delay to prevent overwhelming the system
@@ -510,26 +528,92 @@ int readFeedLevel() {
 // ============================================================================
 
 void dispenseFeed(int seconds) {
-  Serial.print(F("[ACTUATOR] Dispensing feed for "));
+  if (feedingState != FEEDING_IDLE) {
+    Serial.println(F("[ACTUATOR] Already feeding, ignoring request"));
+    return;
+  }
+
+  Serial.print(F("[ACTUATOR] Starting feeding sequence for "));
   Serial.print(seconds);
   Serial.println(F(" seconds..."));
-  
-  // Set motor direction (forward)
-  digitalWrite(MOTOR_IN1, HIGH);
-  digitalWrite(MOTOR_IN2, LOW);
-  
-  // Set motor speed (full speed)
-  analogWrite(MOTOR_ENA, 255);
-  
-  // Run for specified duration
-  delay((unsigned long)seconds * 1000UL);
-  
-  // Stop motor
-  digitalWrite(MOTOR_IN1, LOW);
-  digitalWrite(MOTOR_IN2, LOW);
-  analogWrite(MOTOR_ENA, 0);
-  
-  Serial.println(F("[ACTUATOR] Feed dispensing complete"));
+
+  // Store duration and start state machine
+  feedingDuration = (unsigned long)seconds * 1000UL;
+  feedingState = FEEDING_GATE_OPENING;
+  stateTransitionTime = millis();
+}
+
+void updateFeedingState() {
+  unsigned long now = millis();
+  static FeedingState lastState = FEEDING_IDLE;  // Track state changes
+  bool stateJustChanged = (feedingState != lastState);
+
+  switch (feedingState) {
+    case FEEDING_IDLE:
+      // Nothing to do
+      break;
+
+    case FEEDING_GATE_OPENING:
+      // Only trigger once when entering this state
+      if (stateJustChanged) {
+        feedGate.write(SERVO_OPEN_ANGLE);
+        Serial.println(F("[FEEDING] Gate opening..."));
+      }
+
+      // Wait 500ms for servo to reach position
+      if (now - stateTransitionTime >= 500) {
+        // Start dispensing
+        digitalWrite(MOTOR_IN1, HIGH);
+        digitalWrite(MOTOR_IN2, LOW);
+        analogWrite(MOTOR_ENA, 255);
+
+        feedingState = FEEDING_DISPENSING;
+        feedingStartTime = now;
+        Serial.println(F("[FEEDING] Dispensing feed..."));
+      }
+      break;
+
+    case FEEDING_DISPENSING:
+      // Check if feeding duration has elapsed
+      if (now - feedingStartTime >= feedingDuration) {
+        // Stop motor
+        digitalWrite(MOTOR_IN1, LOW);
+        digitalWrite(MOTOR_IN2, LOW);
+        analogWrite(MOTOR_ENA, 0);
+
+        feedingState = FEEDING_GATE_CLOSING;
+        stateTransitionTime = now;
+        Serial.println(F("[FEEDING] Feed dispensed, closing gate..."));
+      }
+      break;
+
+    case FEEDING_GATE_CLOSING:
+      // Only trigger once when entering this state
+      if (stateJustChanged) {
+        feedGate.write(SERVO_CLOSED_ANGLE);
+        Serial.println(F("[FEEDING] Closing gate..."));
+      }
+
+      // Wait 500ms for servo
+      if (now - stateTransitionTime >= 500) {
+        feedingState = FEEDING_COMPLETE;
+      }
+      break;
+
+    case FEEDING_COMPLETE:
+      // Only trigger once when entering this state
+      if (stateJustChanged) {
+        triggerAlarm();
+        Serial.println(F("[FEEDING] Feeding sequence complete!"));
+      }
+
+      // Return to idle
+      feedingState = FEEDING_IDLE;
+      break;
+  }
+
+  // Update state tracking for next iteration
+  lastState = feedingState;
 }
 
 void openGate() {
@@ -816,23 +900,9 @@ void checkFeedingSchedule() {
 }
 
 void runFeedingSequence() {
-  Serial.println(F("[FEEDING] Starting feeding sequence..."));
-  
-  // 1. Open the gate
-  openGate();
-  delay(500);
-  
-  // 2. Run the spinner motor to dispense feed
+  // Use non-blocking dispenseFeed with default duration
+  // The state machine handles: gate open -> dispense -> gate close -> beep
   dispenseFeed(FEED_DURATION_SECONDS);
-  
-  // 3. Close the gate
-  closeGate();
-  
-  // 4. Beep to indicate completion
-  triggerAlarm();
-  
-  Serial.println(F("[FEEDING] Feeding sequence complete!"));
-  Serial.println(F(""));
 }
 
 void checkSafetyAlerts() {
@@ -962,7 +1032,9 @@ void handleCommand(String command) {
       Serial.print(F("[CMD] Manual feed for "));
       Serial.print(duration);
       Serial.println(F(" seconds"));
-      runFeedingSequence();
+
+      dispenseFeed(duration);  // ✅ Now uses the actual duration parameter!
+
       Serial1.println(F("{\"cmd\":\"FEED\",\"status\":\"OK\"}"));
     } else {
       Serial.println(F("[CMD] Invalid feed duration"));
