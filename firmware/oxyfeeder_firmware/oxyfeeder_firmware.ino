@@ -12,14 +12,14 @@
     - Serial1 (TX1=18, RX1=19) → ESP32 BLE Bridge (JSON output)
     - Serial3 (TX3=14, RX3=15) → SIM800L GSM Module (SMS alerts)
   
-  SENSORS:
+  SENSORS (Updated Feb 2026 - after 12V incident damage):
     - Dissolved Oxygen: DFRobot Analog on A1
-    - Voltage Sensor: 0-25V Module on A0
-    - Load Cell: HX711 on DT=8, SCK=9
-    - RTC: DS3231 on I2C (SDA=20, SCL=21)
-  
+    - Voltage Sensor: 0-25V Module on A2 (A0 DAMAGED)
+    - Load Cell: HX711 on DT=10, SCK=11 (Pin 8/9 DAMAGED)
+    - RTC: DS3231 on I2C (SDA=20, SCL=21) - MODULE DAMAGED, awaiting replacement
+
   ACTUATORS:
-    - DC Motor (Spinner): L298N on IN1=10, IN2=11, ENA=12
+    - DC Motor (Spinner): L298N on IN1=4, IN2=5, ENA=12
     - Servo (Gate): Pin 6
     - Buzzer: Pin 7
   
@@ -46,15 +46,15 @@
 // PIN DEFINITIONS
 // ============================================================================
 
-// Sensors
+// Sensors (UPDATED after bench testing - Feb 2026)
 #define DO_SENSOR_PIN       A1    // Dissolved Oxygen (Analog)
-#define VOLTAGE_SENSOR_PIN  A0    // Battery Voltage (Analog)
-#define HX711_DT_PIN        8     // Load Cell Data
-#define HX711_SCK_PIN       9     // Load Cell Clock
+#define VOLTAGE_SENSOR_PIN  A2    // Battery Voltage (A0 DAMAGED - moved to A2)
+#define HX711_DT_PIN        10    // Load Cell Data (Pin 8 DAMAGED - moved to 10)
+#define HX711_SCK_PIN       11    // Load Cell Clock (Pin 9 DAMAGED - moved to 11)
 
 // Actuators
-#define MOTOR_IN1           10    // L298N Input 1
-#define MOTOR_IN2           11    // L298N Input 2
+#define MOTOR_IN1           4     // L298N Input 1
+#define MOTOR_IN2           5     // L298N Input 2
 #define MOTOR_ENA           12    // L298N Enable A (PWM)
 #define SERVO_PIN           6     // Servo PWM
 #define BUZZER_PIN          7     // Buzzer
@@ -370,7 +370,7 @@ void initSensors() {
   
   // Analog pins (no special init needed)
   Serial.println(F("  - DO Sensor (A1): OK"));
-  Serial.println(F("  - Voltage Sensor (A0): OK"));
+  Serial.println(F("  - Voltage Sensor (A2): OK"));
 }
 
 void initActuators() {

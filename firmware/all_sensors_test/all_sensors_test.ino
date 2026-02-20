@@ -2,7 +2,7 @@
 
 // --- PIN DEFINITIONS ---
 #define VOLT_PIN A2          // Healthy Pin (A0 is dead)
-#define DO_PIN A1            // Dissolved Oxygen Sensor
+#define DO_PIN A1            // Dissolved Oxygen sensor
 #define LOADCELL_DT_PIN 10   // DT pin (Pin 8/9 not working)
 #define LOADCELL_SCK_PIN 11  // SCK pin
 
