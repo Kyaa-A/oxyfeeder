@@ -47,8 +47,8 @@
 // USER CONFIGURATION - Update these values!
 // =============================================================================
 
-const char* WIFI_SSID = "YOUR_WIFI_SSID";      // Your WiFi network name
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";  // Your WiFi password
+const char* WIFI_SSID = "ZTE_2.4G_7aNbXv";      // Your WiFi network name
+const char* WIFI_PASSWORD = "Adminaly@1";  // Your WiFi password
 
 // Stream settings
 #define STREAM_PORT 80                          // HTTP port for video stream
