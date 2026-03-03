@@ -24,7 +24,7 @@
     - Buzzer: Pin 7
   
   DISPLAY:
-    - TFT LCD: ILI9341 via SPI (CS=40, DC=38, RST=-1)
+    - TFT LCD: ST7796S 4.0" 480x320 via SPI (CS=40, DC=38, RST=3.3V)
   
   =============================================================================
 */
@@ -38,9 +38,25 @@
 #include <Servo.h>
 #include <RTClib.h>
 #include <HX711.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_ILI9341.h>
+#include <Arduino_GFX_Library.h>
 #include <EEPROM.h>
+
+// ============================================================================
+// ALPHA TESTING MODE - Disable LCD to prevent white screen issues
+// ============================================================================
+#define ALPHA_MODE true  // Set to false when LCD is working
+
+// Color Definitions (RGB565 format)
+#define BLACK   0x0000
+#define WHITE   0xFFFF
+#define RED     0xF800
+#define GREEN   0x07E0
+#define BLUE    0x001F
+#define CYAN    0x07FF
+#define YELLOW  0xFFE0
+#define ORANGE  0xFD20
+#define NAVY    0x000F
+#define DARKGREY 0x7BEF
 
 // ============================================================================
 // PIN DEFINITIONS
@@ -62,7 +78,7 @@
 // Display (SPI)
 #define TFT_CS              40    // Chip Select
 #define TFT_DC              38    // Data/Command
-#define TFT_RST             -1    // Reset (use Arduino reset)
+#define TFT_RST             -1    // Not using reset pin (RST tied to 3.3V)
 
 // ============================================================================
 // CONFIGURATION - ADJUST THESE VALUES
@@ -118,6 +134,7 @@ const float BATTERY_EMPTY_VOLTAGE = 11.0; // 12V battery empty
 const unsigned long SENSOR_UPDATE_INTERVAL = 2000;   // 2 seconds
 const unsigned long DISPLAY_UPDATE_INTERVAL = 1000;  // 1 second
 const unsigned long JSON_SEND_INTERVAL = 2000;       // 2 seconds
+const unsigned long HEARTBEAT_INTERVAL = 10000;      // 10 seconds - ALIVE indicator
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -126,7 +143,13 @@ const unsigned long JSON_SEND_INTERVAL = 2000;       // 2 seconds
 RTC_DS3231 rtc;
 HX711 scale;
 Servo feedGate;
-Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+
+// TFT Display - ST7796S 4.0" 480x320
+// Hardware SPI: MOSI=51, SCK=52 (fixed on Mega)
+#if !ALPHA_MODE
+Arduino_DataBus *bus = new Arduino_HWSPI(TFT_DC, TFT_CS);
+Arduino_GFX *tft = new Arduino_ST7796(bus, TFT_RST, 1 /* rotation */, true /* IPS */);
+#endif
 
 // ============================================================================
 // GLOBAL VARIABLES - Current Sensor Readings
@@ -146,6 +169,7 @@ bool scaleAvailable = false;
 unsigned long lastSensorRead = 0;
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastJsonSend = 0;
+unsigned long lastHeartbeat = 0;
 bool lastFeedingDone = false;  // Prevents repeated feeding in same minute
 
 // Non-blocking feeding state machine
@@ -200,6 +224,7 @@ void closeGate();
 void triggerAlarm();
 void stopAlarm();
 
+void drawStaticUI();
 void updateDisplay();
 void sendJsonToESP32();
 void sendSMS(const char* message);
@@ -290,11 +315,13 @@ void loop() {
     Serial.println(F("V)"));
   }
   
-  // 2. UPDATE DISPLAY (every 1 second)
+  // 2. UPDATE DISPLAY (every 1 second) - Only if LCD enabled
+#if !ALPHA_MODE
   if (now - lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL) {
     lastDisplayUpdate = now;
     updateDisplay();
   }
+#endif
   
   // 3. SEND JSON TO ESP32 (every 2 seconds)
   if (now - lastJsonSend >= JSON_SEND_INTERVAL) {
@@ -313,7 +340,16 @@ void loop() {
 
   // 7. PROCESS INCOMING COMMANDS FROM APP
   processIncomingCommands();
-  
+
+  // 8. HEARTBEAT - ALIVE INDICATOR (every 10 seconds)
+  if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+    lastHeartbeat = now;
+    Serial.println(F("[HEARTBEAT] ALIVE - System running OK"));
+
+    // Quick beep to confirm system is alive (comment out if annoying)
+    // tone(BUZZER_PIN, 1000, 50);  // 50ms beep at 1kHz
+  }
+
   // Small delay to prevent overwhelming the system
   delay(10);
 }
@@ -357,15 +393,23 @@ void initSensors() {
   // Initialize Load Cell (HX711)
   Serial.print(F("  - Load Cell HX711: "));
   scale.begin(HX711_DT_PIN, HX711_SCK_PIN);
-  
-  if (scale.is_ready()) {
-    scaleAvailable = true;
-    scale.set_scale(calibration_factor);
-    scale.tare();  // Reset to zero
-    Serial.println(F("OK - Tared"));
-  } else {
-    scaleAvailable = false;
-    Serial.println(F("FAILED! Check wiring."));
+
+  // Try multiple times to detect HX711
+  scaleAvailable = false;
+  for (int i = 0; i < 10; i++) {
+    delay(100);
+    if (scale.is_ready()) {
+      scaleAvailable = true;
+      scale.set_scale(calibration_factor);
+      scale.tare();
+      Serial.print(F("OK - Tared (attempt "));
+      Serial.print(i + 1);
+      Serial.println(F(")"));
+      break;
+    }
+  }
+  if (!scaleAvailable) {
+    Serial.println(F("FAILED after 10 attempts! Check DT=10, SCK=11"));
   }
   
   // Analog pins (no special init needed)
@@ -397,32 +441,51 @@ void initActuators() {
 }
 
 void initDisplay() {
+#if ALPHA_MODE
+  // Alpha Mode: LCD disabled, use buzzer feedback instead
+  Serial.println(F("[INIT] TFT display DISABLED (Alpha Mode)"));
+  Serial.println(F("  - Using buzzer for feedback"));
+
+  // Startup beep: 2 short beeps = system starting
+  tone(BUZZER_PIN, 1000, 150);
+  delay(200);
+  tone(BUZZER_PIN, 1500, 150);
+  delay(200);
+  Serial.println(F("  - Startup beep: OK"));
+#else
   Serial.println(F("[INIT] Initializing TFT display..."));
-  
-  tft.begin();
-  tft.setRotation(1);  // Landscape mode
-  tft.fillScreen(ILI9341_BLACK);
-  
+
+  if (!tft->begin()) {
+    Serial.println(F("  - TFT ST7796S: FAILED!"));
+    return;
+  }
+
+  tft->fillScreen(BLACK);
+
   // Draw startup screen
-  tft.setTextColor(ILI9341_CYAN);
-  tft.setTextSize(3);
-  tft.setCursor(60, 50);
-  tft.println(F("OxyFeeder"));
-  
-  tft.setTextSize(2);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setCursor(50, 100);
-  tft.println(F("Initializing..."));
-  
-  tft.setTextSize(1);
-  tft.setTextColor(ILI9341_GREEN);
-  tft.setCursor(80, 150);
-  tft.println(F("Production Build v2.0"));
-  
+  tft->setTextColor(CYAN);
+  tft->setTextSize(4);
+  tft->setCursor(120, 80);
+  tft->println(F("OxyFeeder"));
+
+  tft->setTextSize(2);
+  tft->setTextColor(WHITE);
+  tft->setCursor(140, 140);
+  tft->println(F("Initializing..."));
+
+  tft->setTextSize(1);
+  tft->setTextColor(GREEN);
+  tft->setCursor(160, 200);
+  tft->println(F("Production Build v2.0"));
+
   delay(2000);
-  tft.fillScreen(ILI9341_BLACK);
-  
-  Serial.println(F("  - TFT ILI9341: OK"));
+  tft->fillScreen(BLACK);
+
+  // Draw static UI elements
+  drawStaticUI();
+
+  Serial.println(F("  - TFT ST7796S: OK (480x320)"));
+#endif
 }
 
 void initGSM() {
@@ -537,6 +600,12 @@ void dispenseFeed(int seconds) {
   Serial.print(seconds);
   Serial.println(F(" seconds..."));
 
+#if ALPHA_MODE
+  // Alpha Mode: Single beep to indicate feeding started
+  tone(BUZZER_PIN, 800, 300);
+  delay(350);
+#endif
+
   // Store duration and start state machine
   feedingDuration = (unsigned long)seconds * 1000UL;
   feedingState = FEEDING_GATE_OPENING;
@@ -645,120 +714,154 @@ void stopAlarm() {
 }
 
 // ============================================================================
-// DISPLAY FUNCTIONS
+// DISPLAY FUNCTIONS - ST7796S 480x320
 // ============================================================================
 
+#if !ALPHA_MODE
+void drawStaticUI() {
+  // Header bar
+  tft->fillRect(0, 0, 480, 50, NAVY);
+  tft->setTextColor(WHITE);
+  tft->setTextSize(3);
+  tft->setCursor(120, 12);
+  tft->print(F("OXYFEEDER SYSTEM"));
+
+  // Separator line
+  tft->drawFastHLine(0, 50, 480, WHITE);
+
+  // Sensor box borders
+  tft->drawRect(10, 100, 145, 90, CYAN);    // DO box
+  tft->drawRect(165, 100, 145, 90, YELLOW); // Feed box
+  tft->drawRect(320, 100, 150, 90, GREEN);  // Battery box
+
+  // Sensor labels
+  tft->setTextSize(2);
+  tft->setTextColor(CYAN);
+  tft->setCursor(20, 105);
+  tft->print(F("DO Level"));
+
+  tft->setTextColor(YELLOW);
+  tft->setCursor(175, 105);
+  tft->print(F("Feed Level"));
+
+  tft->setTextColor(GREEN);
+  tft->setCursor(335, 105);
+  tft->print(F("Battery"));
+
+  // Status bar background
+  tft->fillRect(0, 280, 480, 40, DARKGREY);
+}
+
 void updateDisplay() {
-  // Clear only the data areas (not the whole screen - prevents flicker)
-  
-  // Header
-  tft.fillRect(0, 0, 320, 40, ILI9341_NAVY);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(80, 12);
-  tft.print(F("OxyFeeder"));
-  
-  // Time display
-  tft.fillRect(0, 45, 320, 35, ILI9341_BLACK);
-  tft.setTextColor(ILI9341_CYAN);
-  tft.setTextSize(3);
-  tft.setCursor(90, 50);
-  
+  // Only update value areas (prevents flicker)
+
+  // Time display area (below header)
+  tft->fillRect(150, 55, 180, 35, BLACK);
+  tft->setTextColor(CYAN);
+  tft->setTextSize(3);
+  tft->setCursor(155, 60);
+
   if (rtcAvailable) {
-    if (currentTime.hour() < 10) tft.print(F("0"));
-    tft.print(currentTime.hour());
-    tft.print(F(":"));
-    if (currentTime.minute() < 10) tft.print(F("0"));
-    tft.print(currentTime.minute());
-    tft.print(F(":"));
-    if (currentTime.second() < 10) tft.print(F("0"));
-    tft.print(currentTime.second());
+    if (currentTime.hour() < 10) tft->print(F("0"));
+    tft->print(currentTime.hour());
+    tft->print(F(":"));
+    if (currentTime.minute() < 10) tft->print(F("0"));
+    tft->print(currentTime.minute());
+    tft->print(F(":"));
+    if (currentTime.second() < 10) tft->print(F("0"));
+    tft->print(currentTime.second());
   } else {
-    tft.print(F("--:--:--"));
+    tft->print(F("--:--:--"));
   }
-  
-  // Sensor values - DO
-  tft.fillRect(0, 90, 160, 50, ILI9341_BLACK);
-  tft.setTextSize(1);
-  tft.setTextColor(ILI9341_YELLOW);
-  tft.setCursor(10, 95);
-  tft.print(F("Dissolved Oxygen"));
-  tft.setTextSize(2);
-  tft.setCursor(10, 110);
+
+  // DO Value (inside box)
+  tft->fillRect(15, 130, 135, 55, BLACK);
+  tft->setTextSize(3);
+  tft->setCursor(25, 140);
   if (currentDissolvedOxygen < DO_CRITICAL_THRESHOLD) {
-    tft.setTextColor(ILI9341_RED);
+    tft->setTextColor(RED);
   } else {
-    tft.setTextColor(ILI9341_GREEN);
+    tft->setTextColor(GREEN);
   }
-  tft.print(currentDissolvedOxygen, 1);
-  tft.print(F(" mg/L"));
-  
-  // Sensor values - Feed Level
-  tft.fillRect(160, 90, 160, 50, ILI9341_BLACK);
-  tft.setTextSize(1);
-  tft.setTextColor(ILI9341_YELLOW);
-  tft.setCursor(170, 95);
-  tft.print(F("Feed Level"));
-  tft.setTextSize(2);
-  tft.setCursor(170, 110);
+  tft->print(currentDissolvedOxygen, 1);
+  tft->setTextSize(2);
+  tft->setCursor(25, 168);
+  tft->print(F("mg/L"));
+
+  // Feed Level Value (inside box)
+  tft->fillRect(170, 130, 135, 55, BLACK);
+  tft->setTextSize(3);
+  tft->setCursor(185, 140);
   if (currentFeedLevel < LOW_FEED_THRESHOLD) {
-    tft.setTextColor(ILI9341_ORANGE);
+    tft->setTextColor(ORANGE);
   } else {
-    tft.setTextColor(ILI9341_GREEN);
+    tft->setTextColor(GREEN);
   }
-  tft.print(currentFeedLevel);
-  tft.print(F(" %"));
-  
-  // Sensor values - Battery
-  tft.fillRect(0, 150, 160, 50, ILI9341_BLACK);
-  tft.setTextSize(1);
-  tft.setTextColor(ILI9341_YELLOW);
-  tft.setCursor(10, 155);
-  tft.print(F("Battery"));
-  tft.setTextSize(2);
-  tft.setCursor(10, 170);
+  tft->print(currentFeedLevel);
+  tft->print(F("%"));
+
+  // Battery Value (inside box)
+  tft->fillRect(325, 130, 140, 55, BLACK);
+  tft->setTextSize(3);
+  tft->setCursor(335, 140);
   if (currentBatteryPercent < LOW_BATTERY_THRESHOLD) {
-    tft.setTextColor(ILI9341_RED);
+    tft->setTextColor(RED);
   } else {
-    tft.setTextColor(ILI9341_GREEN);
+    tft->setTextColor(GREEN);
   }
-  tft.print(currentBatteryPercent);
-  tft.print(F("% ("));
-  tft.print(currentBatteryVoltage, 1);
-  tft.print(F("V)"));
-  
-  // Status area
-  tft.fillRect(160, 150, 160, 50, ILI9341_BLACK);
-  tft.setTextSize(1);
-  tft.setTextColor(ILI9341_YELLOW);
-  tft.setCursor(170, 155);
-  tft.print(F("Status"));
-  tft.setTextSize(2);
-  tft.setCursor(170, 170);
-  tft.setTextColor(ILI9341_GREEN);
-  tft.print(F("ONLINE"));
-  
-  // Footer - next feeding time
-  tft.fillRect(0, 210, 320, 30, ILI9341_DARKGREY);
-  tft.setTextSize(1);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setCursor(10, 220);
-  tft.print(F("Next Feed: "));
-  
-  // Show next feeding time
+  tft->print(currentBatteryPercent);
+  tft->print(F("%"));
+  tft->setTextSize(2);
+  tft->setCursor(335, 168);
+  tft->print(currentBatteryVoltage, 1);
+  tft->print(F("V"));
+
+  // Status section
+  tft->fillRect(10, 200, 220, 70, BLACK);
+  tft->setTextSize(2);
+  tft->setTextColor(YELLOW);
+  tft->setCursor(15, 205);
+  tft->print(F("System Status:"));
+  tft->setTextSize(2);
+  tft->setCursor(15, 230);
+  if (feedingState != FEEDING_IDLE) {
+    tft->setTextColor(ORANGE);
+    tft->print(F("FEEDING..."));
+  } else {
+    tft->setTextColor(GREEN);
+    tft->print(F("RUNNING"));
+  }
+
+  // BLE Status
+  tft->fillRect(250, 200, 220, 70, BLACK);
+  tft->setTextSize(2);
+  tft->setTextColor(YELLOW);
+  tft->setCursor(255, 205);
+  tft->print(F("Communication:"));
+  tft->setCursor(255, 230);
+  tft->setTextColor(CYAN);
+  tft->print(F("BLE ACTIVE"));
+
+  // Footer - Next feeding time
+  tft->fillRect(10, 285, 460, 30, DARKGREY);
+  tft->setTextSize(2);
+  tft->setTextColor(WHITE);
+  tft->setCursor(15, 292);
+  tft->print(F("Next Feed: "));
+
+  // Calculate next feeding time
   if (rtcAvailable) {
     int currentMinutes = currentTime.hour() * 60 + currentTime.minute();
     int nextFeedHour = -1;
     int nextFeedMin = -1;
-    
-    // Find next scheduled feeding time
+
     if (scheduleCount > 0) {
-      int minDistance = 24 * 60;  // Max possible distance
+      int minDistance = 24 * 60;
       for (int i = 0; i < scheduleCount; i++) {
         if (!schedules[i].enabled) continue;
         int schedMinutes = schedules[i].hour * 60 + schedules[i].minute;
         int distance = schedMinutes - currentMinutes;
-        if (distance < 0) distance += 24 * 60;  // Wrap to next day
+        if (distance < 0) distance += 24 * 60;
         if (distance < minDistance) {
           minDistance = distance;
           nextFeedHour = schedules[i].hour;
@@ -766,10 +869,9 @@ void updateDisplay() {
         }
       }
     } else if (!appSchedulesSynced) {
-      // Use defaults only if app hasn't synced yet
       int feed1Minutes = DEFAULT_FEED_HOUR_1 * 60 + DEFAULT_FEED_MIN_1;
       int feed2Minutes = DEFAULT_FEED_HOUR_2 * 60 + DEFAULT_FEED_MIN_2;
-      
+
       if (currentMinutes < feed1Minutes) {
         nextFeedHour = DEFAULT_FEED_HOUR_1;
         nextFeedMin = DEFAULT_FEED_MIN_1;
@@ -779,24 +881,24 @@ void updateDisplay() {
       } else {
         nextFeedHour = DEFAULT_FEED_HOUR_1;
         nextFeedMin = DEFAULT_FEED_MIN_1;
-        tft.print(F("Tmrw "));
+        tft->print(F("Tmrw "));
       }
     }
-    // If appSchedulesSynced && scheduleCount == 0, nextFeedHour stays -1 (will show "Disabled")
-    
+
     if (nextFeedHour >= 0) {
-      if (nextFeedHour < 10) tft.print(F("0"));
-      tft.print(nextFeedHour);
-      tft.print(F(":"));
-      if (nextFeedMin < 10) tft.print(F("0"));
-      tft.print(nextFeedMin);
+      if (nextFeedHour < 10) tft->print(F("0"));
+      tft->print(nextFeedHour);
+      tft->print(F(":"));
+      if (nextFeedMin < 10) tft->print(F("0"));
+      tft->print(nextFeedMin);
     } else {
-      tft.print(F("Disabled"));
+      tft->print(F("Disabled"));
     }
   } else {
-    tft.print(F("--:--"));
+    tft->print(F("--:--"));
   }
 }
+#endif  // !ALPHA_MODE
 
 // ============================================================================
 // COMMUNICATION FUNCTIONS
