@@ -9,7 +9,16 @@
  *   connects to your WiFi network and streams video via HTTP that can be
  *   viewed in a web browser or integrated into the OxyFeeder Flutter app.
  *
+ * WiFi Setup (WiFiManager - no hardcoding needed!):
+ *   1. On first boot, ESP32-CAM creates a hotspot: "OxyFeeder-CAM"
+ *   2. Connect your phone to this hotspot (password: oxyfeeder123)
+ *   3. A config page opens automatically (or go to 192.168.4.1)
+ *   4. Select your WiFi network and enter password
+ *   5. ESP32-CAM saves credentials and connects automatically
+ *   6. To change WiFi later, visit http://<camera-ip>/reset
+ *
  * Board: AI-Thinker ESP32-CAM
+ * Library Required: WiFiManager by tzapu (install via Library Manager)
  *
  * =============================================================================
  * WIRING DIAGRAM: ESP32-CAM to FTDI Programmer (for uploading code)
@@ -31,7 +40,7 @@
  *   5. Wait for "Connecting..." then release RESET if needed
  *   6. After upload completes, DISCONNECT IO0 from GND
  *   7. Press RESET again to run the program
- *   8. Open Serial Monitor (115200 baud) to see the IP address
+ *   8. Open Serial Monitor (115200 baud) to see setup instructions
  *
  * Note: The ESP32-CAM has no built-in USB. You MUST use an external
  *       FTDI adapter (USB-to-Serial) to upload code.
@@ -41,14 +50,22 @@
 
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <WiFiManager.h>  // https://github.com/tzapu/WiFiManager
 #include "esp_http_server.h"
 
 // =============================================================================
-// USER CONFIGURATION - Update these values!
+// WIFI CONFIGURATION - Via WiFiManager (no hardcoding needed!)
+// =============================================================================
+// On first boot (or if WiFi fails), ESP32-CAM creates a hotspot:
+//   SSID: "OxyFeeder-CAM"
+//   Password: "oxyfeeder123"
+// Connect to it, a config page will open automatically.
+// Enter your WiFi credentials there - they will be saved permanently.
 // =============================================================================
 
-const char* WIFI_SSID = "ZTE_2.4G_7aNbXv";      // Your WiFi network name
-const char* WIFI_PASSWORD = "Adminaly@1";  // Your WiFi password
+#define AP_NAME "OxyFeeder-CAM"           // Hotspot name for setup
+#define AP_PASSWORD "oxyfeeder123"        // Hotspot password (min 8 chars)
+#define CONFIG_TIMEOUT 180                // Seconds before config portal times out
 
 // Stream settings
 #define STREAM_PORT 80                          // HTTP port for video stream
@@ -172,29 +189,67 @@ bool initCamera() {
 }
 
 // =============================================================================
-// WIFI CONNECTION
+// WIFI CONNECTION - Using WiFiManager
 // =============================================================================
+
+WiFiManager wifiManager;
+
+// Callback when entering config mode (AP mode)
+void configModeCallback(WiFiManager *myWiFiManager) {
+  Serial.println();
+  Serial.println("===========================================");
+  Serial.println("  WIFI SETUP MODE");
+  Serial.println("===========================================");
+  Serial.println();
+  Serial.println("Could not connect to saved WiFi.");
+  Serial.println("Starting configuration portal...");
+  Serial.println();
+  Serial.println("Connect your phone to:");
+  Serial.printf("  SSID: %s\n", AP_NAME);
+  Serial.printf("  Password: %s\n", AP_PASSWORD);
+  Serial.println();
+  Serial.println("Then open browser - config page will appear.");
+  Serial.println("Select your WiFi and enter password.");
+  Serial.println();
+  Serial.println("===========================================");
+
+  // Blink LED slowly to indicate config mode
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(LED_GPIO_NUM, HIGH);
+    delay(300);
+    digitalWrite(LED_GPIO_NUM, LOW);
+    delay(300);
+  }
+}
 
 bool connectWiFi() {
   Serial.println();
   Serial.println("===========================================");
-  Serial.println("OxyFeeder Camera Server - Connecting to WiFi");
+  Serial.println("OxyFeeder Camera Server - WiFi Setup");
   Serial.println("===========================================");
-  Serial.printf("SSID: %s\n", WIFI_SSID);
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  WiFi.setSleep(false);  // Disable WiFi sleep for better streaming
+  // Set callback for when entering config mode
+  wifiManager.setAPCallback(configModeCallback);
 
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
+  // Set config portal timeout (seconds)
+  wifiManager.setConfigPortalTimeout(CONFIG_TIMEOUT);
 
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("\nWiFi connection FAILED!");
-    Serial.println("Please check your SSID and PASSWORD.");
+  // Disable WiFi sleep for better streaming
+  WiFi.setSleep(false);
+
+  // Custom parameters could be added here (like camera name, etc.)
+  // WiFiManagerParameter custom_text("<p>OxyFeeder Camera Setup</p>");
+  // wifiManager.addParameter(&custom_text);
+
+  Serial.println("Attempting to connect to saved WiFi...");
+
+  // autoConnect tries saved credentials first
+  // If fails, starts config portal with given AP name/password
+  if (!wifiManager.autoConnect(AP_NAME, AP_PASSWORD)) {
+    Serial.println("\nConfig portal timed out!");
+    Serial.println("No WiFi configured. Restarting...");
+    delay(3000);
+    ESP.restart();
     return false;
   }
 
@@ -211,6 +266,9 @@ bool connectWiFi() {
   Serial.println();
   Serial.println("Enter this URL in your browser or Flutter app");
   Serial.println("to view the live camera feed.");
+  Serial.println();
+  Serial.println("Tip: To change WiFi, hold RESET for 10 sec");
+  Serial.println("     or reflash to clear saved credentials.");
   Serial.println();
   Serial.println("===========================================");
 
@@ -293,18 +351,70 @@ static esp_err_t index_handler(httpd_req_t *req) {
     "h1 { color: #00d9ff; }"
     "img { max-width: 100%; border: 2px solid #00d9ff; border-radius: 8px; }"
     ".info { margin: 20px 0; padding: 15px; background: #16213e; border-radius: 8px; }"
+    ".btn { display: inline-block; margin: 10px; padding: 10px 20px; background: #e74c3c; color: white; "
+    "text-decoration: none; border-radius: 5px; font-size: 14px; }"
+    ".btn:hover { background: #c0392b; }"
     "</style>"
     "</head>"
     "<body>"
     "<h1>OxyFeeder Camera</h1>"
     "<div class='info'>Live Fishpond Monitoring</div>"
     "<img src='/stream' />"
-    "<div class='info'>Stream URL: <code>/stream</code></div>"
+    "<div class='info'>"
+    "Stream URL: <code>/stream</code><br><br>"
+    "<a href='/reset' class='btn' onclick=\"return confirm('Reset WiFi settings?');\">Reset WiFi</a>"
+    "</div>"
     "</body>"
     "</html>";
 
   httpd_resp_set_type(req, "text/html");
   return httpd_resp_send(req, html, strlen(html));
+}
+
+// Handler for WiFi reset - clears saved credentials and restarts
+static esp_err_t reset_handler(httpd_req_t *req) {
+  const char* html =
+    "<!DOCTYPE html>"
+    "<html>"
+    "<head>"
+    "<title>WiFi Reset</title>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    "<style>"
+    "body { font-family: Arial; text-align: center; background: #1a1a2e; color: #eee; padding: 50px; }"
+    "h1 { color: #e74c3c; }"
+    ".info { margin: 20px; padding: 20px; background: #16213e; border-radius: 8px; }"
+    "</style>"
+    "</head>"
+    "<body>"
+    "<h1>WiFi Settings Reset!</h1>"
+    "<div class='info'>"
+    "<p>Saved WiFi credentials have been cleared.</p>"
+    "<p>Device is restarting...</p>"
+    "<p>Connect to <strong>OxyFeeder-CAM</strong> hotspot to reconfigure.</p>"
+    "</div>"
+    "</body>"
+    "</html>";
+
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_send(req, html, strlen(html));
+
+  Serial.println();
+  Serial.println("===========================================");
+  Serial.println("  WiFi RESET requested via web interface");
+  Serial.println("===========================================");
+  Serial.println("Clearing saved credentials and restarting...");
+
+  delay(1000);
+
+  // Clear WiFi settings
+  wifiManager.resetSettings();
+
+  delay(1000);
+
+  // Restart ESP32
+  ESP.restart();
+
+  return ESP_OK;
 }
 
 // =============================================================================
@@ -331,12 +441,23 @@ void startStreamServer() {
     .user_ctx  = NULL
   };
 
+  httpd_uri_t reset_uri = {
+    .uri       = "/reset",
+    .method    = HTTP_GET,
+    .handler   = reset_handler,
+    .user_ctx  = NULL
+  };
+
   Serial.printf("Starting web server on port %d\n", config.server_port);
 
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(stream_httpd, &index_uri);
     httpd_register_uri_handler(stream_httpd, &stream_uri);
+    httpd_register_uri_handler(stream_httpd, &reset_uri);
     Serial.println("Web server started successfully!");
+    Serial.println("  /        - Camera page with stream");
+    Serial.println("  /stream  - Raw MJPEG stream");
+    Serial.println("  /reset   - Clear WiFi and reconfigure");
   } else {
     Serial.println("Error starting web server!");
   }
