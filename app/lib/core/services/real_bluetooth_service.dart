@@ -393,7 +393,7 @@ class RealBluetoothService implements BluetoothServiceInterface {
       print('RealBluetoothService: Sending command: $command');
       await _commandCharacteristic!.write(
         utf8.encode(command),
-        withoutResponse: true,
+        withoutResponse: false,
       );
       print('RealBluetoothService: Command sent successfully');
       return true;

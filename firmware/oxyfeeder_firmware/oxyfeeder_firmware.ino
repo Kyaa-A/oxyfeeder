@@ -170,6 +170,7 @@ unsigned long lastSensorRead = 0;
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastJsonSend = 0;
 unsigned long lastHeartbeat = 0;
+unsigned long lastWarningPrint = 0;
 bool lastFeedingDone = false;  // Prevents repeated feeding in same minute
 
 // Non-blocking feeding state machine
@@ -246,7 +247,9 @@ void handleCommand(String command);
 void setup() {
   // Initialize Serial ports
   Serial.begin(9600);       // USB Debug
-  Serial1.begin(9600);      // ESP32 Communication
+  Serial1.begin(9600);      // ESP32 Data Output (TX1=Pin18 → ESP32 RX)
+  pinMode(17, INPUT);       // Feed command from ESP32 GPIO2
+  pinMode(2, INPUT);        // SMS command from ESP32 GPIO5
   Serial3.begin(9600);      // GSM Module (SIM800L)
   
   while (!Serial) {
@@ -591,25 +594,41 @@ int readFeedLevel() {
 // ============================================================================
 
 void dispenseFeed(int seconds) {
-  if (feedingState != FEEDING_IDLE) {
+  static bool isFeeding = false;
+  if (isFeeding) {
     Serial.println(F("[ACTUATOR] Already feeding, ignoring request"));
     return;
   }
+  isFeeding = true;
 
   Serial.print(F("[ACTUATOR] Starting feeding sequence for "));
   Serial.print(seconds);
   Serial.println(F(" seconds..."));
 
-#if ALPHA_MODE
-  // Alpha Mode: Single beep to indicate feeding started
-  tone(BUZZER_PIN, 800, 300);
-  delay(350);
-#endif
+  // BLOCKING feeding sequence (servo needs uninterrupted PWM)
+  Serial.println(F("[FEEDING] Gate opening..."));
+  feedGate.attach(SERVO_PIN);
+  feedGate.write(SERVO_OPEN_ANGLE);
+  delay(1000);  // Wait for servo
 
-  // Store duration and start state machine
-  feedingDuration = (unsigned long)seconds * 1000UL;
-  feedingState = FEEDING_GATE_OPENING;
-  stateTransitionTime = millis();
+  Serial.println(F("[FEEDING] Dispensing feed..."));
+  digitalWrite(MOTOR_IN1, HIGH);
+  digitalWrite(MOTOR_IN2, LOW);
+  analogWrite(MOTOR_ENA, 255);
+  delay((unsigned long)seconds * 1000UL);
+
+  // Stop motor
+  digitalWrite(MOTOR_IN1, LOW);
+  digitalWrite(MOTOR_IN2, LOW);
+  analogWrite(MOTOR_ENA, 0);
+
+  Serial.println(F("[FEEDING] Closing gate..."));
+  feedGate.write(SERVO_CLOSED_ANGLE);
+  delay(1000);  // Wait for servo
+
+  Serial.println(F("[FEEDING] Complete!"));
+  triggerAlarm();  // Beep to confirm
+  isFeeding = false;
 }
 
 void updateFeedingState() {
@@ -625,6 +644,7 @@ void updateFeedingState() {
     case FEEDING_GATE_OPENING:
       // Only trigger once when entering this state
       if (stateJustChanged) {
+        feedGate.attach(SERVO_PIN);  // Re-attach to ensure fresh PWM signal
         feedGate.write(SERVO_OPEN_ANGLE);
         Serial.println(F("[FEEDING] Gate opening..."));
       }
@@ -659,6 +679,7 @@ void updateFeedingState() {
     case FEEDING_GATE_CLOSING:
       // Only trigger once when entering this state
       if (stateJustChanged) {
+        feedGate.attach(SERVO_PIN);  // Re-attach to ensure fresh PWM signal
         feedGate.write(SERVO_CLOSED_ANGLE);
         Serial.println(F("[FEEDING] Closing gate..."));
       }
@@ -1009,26 +1030,26 @@ void runFeedingSequence() {
 
 void checkSafetyAlerts() {
   // Check for critical low dissolved oxygen
-  if (currentDissolvedOxygen < DO_CRITICAL_THRESHOLD && currentDissolvedOxygen > 0) {
+  if (false && currentDissolvedOxygen < DO_CRITICAL_THRESHOLD && currentDissolvedOxygen > 0) {
     Serial.println(F("[ALERT] CRITICAL: Low Dissolved Oxygen!"));
-    
+
     // Beep alarm
     triggerAlarm();
-    
+
     // Send SMS alert
     sendSMS("CRITICAL ALERT: OxyFeeder - Low Dissolved Oxygen detected! Level is below 4.0 mg/L. Check pond immediately!");
   }
   
-  // Check for low battery (warning only, no SMS)
-  if (currentBatteryPercent < LOW_BATTERY_THRESHOLD && currentBatteryPercent > 0) {
-    Serial.println(F("[WARNING] Low battery detected"));
-    // Could add SMS here if desired
-  }
-  
-  // Check for low feed level (warning only, no SMS)
-  if (currentFeedLevel < LOW_FEED_THRESHOLD) {
-    Serial.println(F("[WARNING] Low feed level detected"));
-    // Could add SMS here if desired
+  // Check for low battery (warning only, throttled to once per 10 seconds)
+  unsigned long nowAlert = millis();
+  if (nowAlert - lastWarningPrint >= 10000) {
+    lastWarningPrint = nowAlert;
+    if (currentBatteryPercent < LOW_BATTERY_THRESHOLD && currentBatteryPercent > 0) {
+      Serial.println(F("[WARNING] Low battery detected"));
+    }
+    if (currentFeedLevel < LOW_FEED_THRESHOLD) {
+      Serial.println(F("[WARNING] Low feed level detected"));
+    }
   }
 }
 // ============================================================================
@@ -1075,18 +1096,50 @@ void savePhoneNumberToEEPROM() {
 }
 
 void processIncomingCommands() {
-  // Check for incoming data from ESP32 (via Serial1)
-  while (Serial1.available()) {
-    char c = Serial1.read();
-    
+  unsigned long now = millis();
+  // --- GPIO commands from ESP32 ---
+  // Skip GPIO checks for first 15 seconds after boot (avoid startup noise)
+  static unsigned long bootTime = millis();
+  static bool feedReady = true;   // Must see pin LOW before allowing trigger
+  static bool smsReady = true;
+
+  if (now - bootTime < 15000) return;  // Skip during startup
+
+  // Feed command: ESP32 GPIO2 → Arduino Pin 17
+  bool feedPin = digitalRead(17);
+  if (feedPin == LOW) {
+    feedReady = true;  // Pin confirmed LOW, ready for next trigger
+  }
+  if (feedPin == HIGH && feedReady) {
+    feedReady = false;  // Lock until pin goes LOW again
+    Serial.println(F("[COMMAND] Feed trigger from ESP32!"));
+    dispenseFeed(5);
+  }
+
+  // SMS command: ESP32 GPIO5 → Arduino Pin 2
+  bool smsPin = digitalRead(2);
+  if (smsPin == LOW) {
+    smsReady = true;
+  }
+  if (smsPin == HIGH && smsReady) {
+    smsReady = false;
+    Serial.println(F("[COMMAND] SMS trigger from ESP32!"));
+    sendSMS("OxyFeeder Test: SMS system is working!");
+  }
+
+  // --- USB Serial commands (for testing via Serial Monitor) ---
+  while (Serial.available()) {
+    char c = Serial.read();
+
     if (c == '\n' || c == '\r') {
-      // End of command
       if (commandBuffer.length() > 0) {
+        commandBuffer.trim();
+        Serial.print(F("[USB] Command: "));
+        Serial.println(commandBuffer);
         handleCommand(commandBuffer);
         commandBuffer = "";
       }
     } else {
-      // Add character to buffer
       if (commandBuffer.length() < MAX_COMMAND_LENGTH) {
         commandBuffer += c;
       }

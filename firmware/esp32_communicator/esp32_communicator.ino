@@ -50,6 +50,10 @@ bool oldDeviceConnected = false;
 String receivedData = "";
 const int MAX_DATA_LENGTH = 200; // Maximum expected JSON string length
 
+// Command GPIO pins (direct wire to Arduino, active HIGH pulse)
+#define CMD_FEED_PIN 2   // GPIO2 = onboard LED, wire to Arduino Pin 17
+#define CMD_SMS_PIN 5    // GPIO5, wire to Arduino Pin 2
+
 // ----------------------------------------------------------------------------
 // 4) BLE Callback Classes
 // ----------------------------------------------------------------------------
@@ -75,9 +79,22 @@ class CommandCallbacks: public BLECharacteristicCallbacks {
         Serial.print("Received command from app: ");
         Serial.println(rxValue);
         
-        // Forward command to Arduino via Serial2
-        Serial2.println(rxValue);
-        Serial.println("Command forwarded to Arduino");
+        // Forward command to Arduino via GPIO pulse
+        if (rxValue.startsWith("FEED")) {
+          digitalWrite(CMD_FEED_PIN, HIGH);
+          delay(500);
+          digitalWrite(CMD_FEED_PIN, LOW);
+          Serial.println("Pulsed FEED pin HIGH for 500ms");
+        } else if (rxValue.startsWith("TEST_SMS")) {
+          digitalWrite(CMD_SMS_PIN, HIGH);
+          delay(500);
+          digitalWrite(CMD_SMS_PIN, LOW);
+          Serial.println("Pulsed SMS pin HIGH for 500ms");
+        } else {
+          Serial.print("Forwarded via Serial2: ");
+          Serial.println(rxValue);
+          Serial2.println(rxValue);
+        }
       }
     }
 };
@@ -89,13 +106,16 @@ class CommandCallbacks: public BLECharacteristicCallbacks {
 void setup() {
   // Initialize USB Serial for debugging
   Serial.begin(115200);
-  while (!Serial) {
-    ; // Wait for serial port to connect
-  }
+  delay(500); // Short delay for serial to settle (no blocking wait)
   
-  // Initialize Serial2 to communicate with Arduino Mega
-  // RX=Pin 16 (receives from Arduino TX1), TX=Pin 17 (sends to Arduino RX1)
-  Serial2.begin(9600, SERIAL_8N1, 16, 17); // RX=16, TX=17
+  // Serial2: RX only from Arduino
+  Serial2.begin(9600, SERIAL_8N1, 16, -1); // RX=16, no TX
+
+  // Command GPIO pins
+  pinMode(CMD_FEED_PIN, OUTPUT);
+  pinMode(CMD_SMS_PIN, OUTPUT);
+  digitalWrite(CMD_FEED_PIN, LOW);
+  digitalWrite(CMD_SMS_PIN, LOW);
   
   Serial.println("ESP32 OxyFeeder Communicator v2.0 Starting...");
   Serial.println("Serial2 initialized for Arduino communication");

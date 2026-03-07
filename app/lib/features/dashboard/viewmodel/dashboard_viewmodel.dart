@@ -8,9 +8,9 @@ class DashboardViewModel extends ChangeNotifier {
   StreamSubscription<OxyFeederStatus>? _statusSubscription;
 
   OxyFeederStatus _status = const OxyFeederStatus(
-    dissolvedOxygen: 7.5,
-    feedLevel: 80,
-    batteryStatus: 90,
+    dissolvedOxygen: 0.0,
+    feedLevel: 0,
+    batteryStatus: 0,
   );
 
   DashboardViewModel(this._bluetoothService) {

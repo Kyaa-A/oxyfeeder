@@ -47,5 +47,12 @@ void setup() {
 }
 
 void loop() {
-  // Do nothing - test runs once in setup
+  // Sweep open and close continuously
+  Serial.println("Opening gate (90 deg)...");
+  myServo.write(90);
+  delay(1000);
+
+  Serial.println("Closing gate (0 deg)...");
+  myServo.write(0);
+  delay(1000);
 }
