@@ -267,10 +267,12 @@ class _CameraScreenState extends State<CameraScreen> {
 
     // Use flutter_mjpeg to display the stream
     return Stack(
+      fit: StackFit.expand,
       children: [
         Mjpeg(
           stream: _streamUrl,
           isLive: true,
+          fit: BoxFit.cover,
           timeout: const Duration(seconds: 10),
           error: (context, error, stack) {
             // Update error state

@@ -173,20 +173,6 @@ unsigned long lastHeartbeat = 0;
 unsigned long lastWarningPrint = 0;
 bool lastFeedingDone = false;  // Prevents repeated feeding in same minute
 
-// Non-blocking feeding state machine
-enum FeedingState {
-  FEEDING_IDLE,
-  FEEDING_GATE_OPENING,
-  FEEDING_DISPENSING,
-  FEEDING_GATE_CLOSING,
-  FEEDING_COMPLETE
-};
-
-FeedingState feedingState = FEEDING_IDLE;
-unsigned long feedingStartTime = 0;
-unsigned long feedingDuration = 0;
-unsigned long stateTransitionTime = 0;
-
 // SMS cooldown to prevent spam
 unsigned long lastSmsSent = 0;
 const unsigned long SMS_COOLDOWN = 300000;  // 5 minutes between SMS
@@ -219,7 +205,6 @@ float readWeight();
 int readFeedLevel();
 
 void dispenseFeed(int seconds);
-void updateFeedingState();  // Non-blocking feeding state machine
 void openGate();
 void closeGate();
 void triggerAlarm();
@@ -332,19 +317,16 @@ void loop() {
     sendJsonToESP32();
   }
   
-  // 4. UPDATE NON-BLOCKING FEEDING STATE
-  updateFeedingState();
-
-  // 5. CHECK FEEDING SCHEDULE
+  // 4. CHECK FEEDING SCHEDULE
   checkFeedingSchedule();
 
-  // 6. CHECK SAFETY ALERTS
+  // 5. CHECK SAFETY ALERTS
   checkSafetyAlerts();
 
-  // 7. PROCESS INCOMING COMMANDS FROM APP
+  // 6. PROCESS INCOMING COMMANDS FROM APP
   processIncomingCommands();
 
-  // 8. HEARTBEAT - ALIVE INDICATOR (every 10 seconds)
+  // 7. HEARTBEAT - ALIVE INDICATOR (every 10 seconds)
   if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) {
     lastHeartbeat = now;
     Serial.println(F("[HEARTBEAT] ALIVE - System running OK"));
@@ -631,81 +613,6 @@ void dispenseFeed(int seconds) {
   isFeeding = false;
 }
 
-void updateFeedingState() {
-  unsigned long now = millis();
-  static FeedingState lastState = FEEDING_IDLE;  // Track state changes
-  bool stateJustChanged = (feedingState != lastState);
-
-  switch (feedingState) {
-    case FEEDING_IDLE:
-      // Nothing to do
-      break;
-
-    case FEEDING_GATE_OPENING:
-      // Only trigger once when entering this state
-      if (stateJustChanged) {
-        feedGate.attach(SERVO_PIN);  // Re-attach to ensure fresh PWM signal
-        feedGate.write(SERVO_OPEN_ANGLE);
-        Serial.println(F("[FEEDING] Gate opening..."));
-      }
-
-      // Wait 500ms for servo to reach position
-      if (now - stateTransitionTime >= 500) {
-        // Start dispensing
-        digitalWrite(MOTOR_IN1, HIGH);
-        digitalWrite(MOTOR_IN2, LOW);
-        analogWrite(MOTOR_ENA, 255);
-
-        feedingState = FEEDING_DISPENSING;
-        feedingStartTime = now;
-        Serial.println(F("[FEEDING] Dispensing feed..."));
-      }
-      break;
-
-    case FEEDING_DISPENSING:
-      // Check if feeding duration has elapsed
-      if (now - feedingStartTime >= feedingDuration) {
-        // Stop motor
-        digitalWrite(MOTOR_IN1, LOW);
-        digitalWrite(MOTOR_IN2, LOW);
-        analogWrite(MOTOR_ENA, 0);
-
-        feedingState = FEEDING_GATE_CLOSING;
-        stateTransitionTime = now;
-        Serial.println(F("[FEEDING] Feed dispensed, closing gate..."));
-      }
-      break;
-
-    case FEEDING_GATE_CLOSING:
-      // Only trigger once when entering this state
-      if (stateJustChanged) {
-        feedGate.attach(SERVO_PIN);  // Re-attach to ensure fresh PWM signal
-        feedGate.write(SERVO_CLOSED_ANGLE);
-        Serial.println(F("[FEEDING] Closing gate..."));
-      }
-
-      // Wait 500ms for servo
-      if (now - stateTransitionTime >= 500) {
-        feedingState = FEEDING_COMPLETE;
-      }
-      break;
-
-    case FEEDING_COMPLETE:
-      // Only trigger once when entering this state
-      if (stateJustChanged) {
-        triggerAlarm();
-        Serial.println(F("[FEEDING] Feeding sequence complete!"));
-      }
-
-      // Return to idle
-      feedingState = FEEDING_IDLE;
-      break;
-  }
-
-  // Update state tracking for next iteration
-  lastState = feedingState;
-}
-
 void openGate() {
   Serial.println(F("[ACTUATOR] Opening gate..."));
   feedGate.write(SERVO_OPEN_ANGLE);
@@ -845,13 +752,8 @@ void updateDisplay() {
   tft->print(F("System Status:"));
   tft->setTextSize(2);
   tft->setCursor(15, 230);
-  if (feedingState != FEEDING_IDLE) {
-    tft->setTextColor(ORANGE);
-    tft->print(F("FEEDING..."));
-  } else {
-    tft->setTextColor(GREEN);
-    tft->print(F("RUNNING"));
-  }
+  tft->setTextColor(GREEN);
+  tft->print(F("RUNNING"));
 
   // BLE Status
   tft->fillRect(250, 200, 220, 70, BLACK);
@@ -1023,8 +925,6 @@ void checkFeedingSchedule() {
 }
 
 void runFeedingSequence() {
-  // Use non-blocking dispenseFeed with default duration
-  // The state machine handles: gate open -> dispense -> gate close -> beep
   dispenseFeed(FEED_DURATION_SECONDS);
 }
 

@@ -349,7 +349,7 @@ static esp_err_t index_handler(httpd_req_t *req) {
     "<style>"
     "body { font-family: Arial; text-align: center; background: #1a1a2e; color: #eee; margin: 0; padding: 20px; }"
     "h1 { color: #00d9ff; }"
-    "img { max-width: 100%; border: 2px solid #00d9ff; border-radius: 8px; }"
+    "img { width: 100%; height: auto; object-fit: contain; border: 2px solid #00d9ff; border-radius: 8px; }"
     ".info { margin: 20px 0; padding: 15px; background: #16213e; border-radius: 8px; }"
     ".btn { display: inline-block; margin: 10px; padding: 10px 20px; background: #e74c3c; color: white; "
     "text-decoration: none; border-radius: 5px; font-size: 14px; }"
