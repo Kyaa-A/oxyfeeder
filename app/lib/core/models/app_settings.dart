@@ -34,9 +34,7 @@ class AppSettings {
   });
 
   factory AppSettings.defaults() => const AppSettings(
-        feedingSchedules: [
-          FeedingSchedule(timeLabel: '08:00 AM', durationSeconds: 10, enabled: true),
-        ],
+        feedingSchedules: [],
         minDissolvedOxygen: 4.5,
         lowFeedThreshold: 20,
         lowBatteryThreshold: 25,

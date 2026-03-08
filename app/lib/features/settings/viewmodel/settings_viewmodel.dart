@@ -77,7 +77,7 @@ class SettingsViewModel extends ChangeNotifier {
     }
 
     _appSettings = AppSettings(
-      feedingSchedules: schedules.isNotEmpty ? schedules : _appSettings.feedingSchedules,
+      feedingSchedules: schedulesJson != null ? schedules : _appSettings.feedingSchedules,
       minDissolvedOxygen: minDO ?? _appSettings.minDissolvedOxygen,
       lowFeedThreshold: lowFeed ?? _appSettings.lowFeedThreshold,
       lowBatteryThreshold: lowBattery ?? _appSettings.lowBatteryThreshold,

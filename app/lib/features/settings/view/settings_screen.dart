@@ -575,7 +575,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     int hour = 8;
     int minute = 0;
     String period = 'AM';
-    int duration = 10;
+    int duration = 3;
     bool enabled = true;
 
     await showDialog<void>(
@@ -680,7 +680,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       isExpanded: true,
                       dropdownColor: const Color(0xFF1E293B),
                       style: const TextStyle(color: Colors.white, fontSize: 16, fontFamily: 'RobotoMono'),
-                      items: [5, 10, 15, 20, 30, 45, 60]
+                      items: [1, 2, 3, 5, 10, 15, 20, 30]
                           .map((d) => DropdownMenuItem(value: d, child: Text('$d sec')))
                           .toList(),
                       onChanged: (v) => setState(() => duration = v!),
