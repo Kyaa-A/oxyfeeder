@@ -38,9 +38,12 @@ class SensorsScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: <Widget>[
-              // System Status Card
+              // Component Health Check
               Consumer<SensorsViewModel>(
                 builder: (context, viewModel, _) {
+                  final status = viewModel.currentStatus;
+                  final isLive = viewModel.isReceivingData;
+
                   return Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -55,7 +58,7 @@ class SensorsScreen extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text(
-                              'LIVE READINGS',
+                              'COMPONENT STATUS',
                               style: TextStyle(
                                 color: Colors.white54,
                                 fontSize: 10,
@@ -66,15 +69,15 @@ class SensorsScreen extends StatelessWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: viewModel.isReceivingData 
+                                color: isLive
                                     ? const Color(0xFF10B981).withOpacity(0.2)
                                     : const Color(0xFFF59E0B).withOpacity(0.2),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
-                                viewModel.isReceivingData ? 'LIVE' : 'WAITING',
+                                isLive ? 'ONLINE' : 'OFFLINE',
                                 style: TextStyle(
-                                  color: viewModel.isReceivingData 
+                                  color: isLive
                                       ? const Color(0xFF10B981)
                                       : const Color(0xFFF59E0B),
                                   fontSize: 9,
@@ -85,25 +88,60 @@ class SensorsScreen extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 16),
-                        _buildSensorRow(
-                          'Dissolved Oxygen',
-                          '${viewModel.currentStatus.dissolvedOxygen.toStringAsFixed(2)} mg/L',
+                        _buildComponentRow(
+                          'BLE Connection',
+                          isLive ? 'Connected' : 'No signal',
+                          Icons.bluetooth,
+                          isLive,
+                        ),
+                        Divider(color: Colors.white.withOpacity(0.05), height: 16),
+                        _buildComponentRow(
+                          'DO Sensor (A1)',
+                          isLive ? '${status.dissolvedOxygen.toStringAsFixed(1)} mg/L' : '--',
                           Icons.water_drop_outlined,
-                          Colors.tealAccent,
+                          isLive && status.dissolvedOxygen > 0,
                         ),
-                        Divider(color: Colors.white.withOpacity(0.05), height: 24),
-                        _buildSensorRow(
-                          'Feed Level',
-                          '${viewModel.currentStatus.feedLevel}%',
-                          Icons.inventory_2_outlined,
-                          Colors.amberAccent,
+                        Divider(color: Colors.white.withOpacity(0.05), height: 16),
+                        _buildComponentRow(
+                          'Load Cell (HX711)',
+                          isLive ? '${status.feedLevel}%' : '--',
+                          Icons.scale_outlined,
+                          isLive && status.feedLevel >= 0,
                         ),
-                        Divider(color: Colors.white.withOpacity(0.05), height: 24),
-                        _buildSensorRow(
-                          'Battery',
-                          '${viewModel.currentStatus.batteryStatus}% (${viewModel.batteryVoltage})',
+                        Divider(color: Colors.white.withOpacity(0.05), height: 16),
+                        _buildComponentRow(
+                          'Voltage Sensor (A2)',
+                          isLive ? '${status.batteryStatus}%' : '--',
                           Icons.bolt_outlined,
-                          Colors.greenAccent,
+                          isLive && status.batteryStatus > 0,
+                        ),
+                        Divider(color: Colors.white.withOpacity(0.05), height: 16),
+                        _buildComponentRow(
+                          'RTC (DS3231)',
+                          isLive ? 'Active' : '--',
+                          Icons.schedule_outlined,
+                          isLive,
+                        ),
+                        Divider(color: Colors.white.withOpacity(0.05), height: 16),
+                        _buildComponentRow(
+                          'Servo (Pin 6)',
+                          'Ready',
+                          Icons.rotate_right,
+                          true,
+                        ),
+                        Divider(color: Colors.white.withOpacity(0.05), height: 16),
+                        _buildComponentRow(
+                          'Motor (L298N)',
+                          'Ready',
+                          Icons.settings_outlined,
+                          true,
+                        ),
+                        Divider(color: Colors.white.withOpacity(0.05), height: 16),
+                        _buildComponentRow(
+                          'SIM800L (SMS)',
+                          'Standby',
+                          Icons.sms_outlined,
+                          true,
                         ),
                       ],
                     ),
@@ -248,7 +286,10 @@ class SensorsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSensorRow(String label, String value, IconData icon, Color color) {
+  Widget _buildComponentRow(String label, String value, IconData icon, bool isOk) {
+    final color = isOk ? const Color(0xFF10B981) : const Color(0xFFEF4444);
+    final statusLabel = isOk ? 'OK' : 'N/A';
+
     return Row(
       children: [
         Container(
@@ -257,33 +298,46 @@ class SensorsScreen extends StatelessWidget {
             color: color.withOpacity(0.1),
             borderRadius: BorderRadius.circular(6),
           ),
-          child: Icon(icon, color: color, size: 18),
+          child: Icon(icon, color: color, size: 16),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                label.toUpperCase(),
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.6),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
+                label,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 14,
-                  fontFamily: 'RobotoMono',
+                  fontSize: 13,
                   fontWeight: FontWeight.w500,
                 ),
               ),
+              Text(
+                value,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.4),
+                  fontSize: 11,
+                  fontFamily: 'RobotoMono',
+                ),
+              ),
             ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            statusLabel,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5,
+            ),
           ),
         ),
       ],

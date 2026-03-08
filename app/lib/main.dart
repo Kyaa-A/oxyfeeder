@@ -35,12 +35,6 @@ class OxyFeederApp extends StatelessWidget {
             return svc;
           },
         ),
-        ChangeNotifierProvider<DashboardViewModel>(
-          create: (ctx) => DashboardViewModel(ctx.read<RealBluetoothService>()),
-        ),
-        ChangeNotifierProvider<SensorsViewModel>(
-          create: (ctx) => SensorsViewModel(ctx.read<RealBluetoothService>()),
-        ),
         ChangeNotifierProvider<SettingsViewModel>(
           create: (ctx) {
             final vm = SettingsViewModel();
@@ -49,6 +43,19 @@ class OxyFeederApp extends StatelessWidget {
             vm.init(); // Load persistent settings
             return vm;
           },
+        ),
+        ChangeNotifierProvider<DashboardViewModel>(
+          create: (ctx) {
+            final ble = ctx.read<RealBluetoothService>();
+            final vm = DashboardViewModel(ble);
+            vm.setEventLogService(ctx.read<EventLogService>());
+            vm.setSettingsViewModel(ctx.read<SettingsViewModel>());
+            vm.listenToConnectionState(ble);
+            return vm;
+          },
+        ),
+        ChangeNotifierProvider<SensorsViewModel>(
+          create: (ctx) => SensorsViewModel(ctx.read<RealBluetoothService>()),
         ),
       ],
       child: MaterialApp(
