@@ -68,6 +68,15 @@ class DashboardViewModel extends ChangeNotifier {
   void _checkThresholds(OxyFeederStatus status) {
     if (_eventLogService == null || _settingsViewModel == null) return;
 
+    // Skip alerts if notifications are disabled in settings
+    if (!_settingsViewModel!.notificationsEnabled) {
+      _activeAlerts = [];
+      _lowOxygenAlerted = false;
+      _lowFeedAlerted = false;
+      _lowBatteryAlerted = false;
+      return;
+    }
+
     final minDO = _settingsViewModel!.minDissolvedOxygen;
     final lowFeed = _settingsViewModel!.lowFeedThreshold;
     final lowBattery = _settingsViewModel!.lowBatteryThreshold;

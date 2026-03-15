@@ -17,6 +17,152 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   bool _isFeeding = false;
 
+  void _showSensorDetail({
+    required String title,
+    required String value,
+    required String status,
+    required Color statusColor,
+    required IconData icon,
+    required double progress,
+    required String description,
+    required String howItWorks,
+    required String threshold,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1E293B),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Handle bar
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Header with icon and value
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Icon(icon, color: statusColor, size: 28),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        value,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: statusColor.withOpacity(0.4)),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // Progress bar
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress.clamp(0.0, 1.0),
+                minHeight: 6,
+                backgroundColor: Colors.white.withOpacity(0.08),
+                valueColor: AlwaysStoppedAnimation<Color>(statusColor),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Info sections
+            _buildInfoSection('What it measures', description),
+            const SizedBox(height: 16),
+            _buildInfoSection('How it works', howItWorks),
+            const SizedBox(height: 16),
+            _buildInfoSection('Alert threshold', threshold),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoSection(String title, String content) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title.toUpperCase(),
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.4),
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.2,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          content,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 13,
+            height: 1.5,
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _handleFeedNow(SettingsViewModel vm) async {
     setState(() => _isFeeding = true);
     final success = await vm.triggerManualFeed();
@@ -278,7 +424,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 icon: Icons.water_drop_outlined,
                 statusColor: getDoColor(status.dissolvedOxygen),
                 progress: status.dissolvedOxygen / 10.0,
-                onTap: widget.onNavigateToSensors,
+                onTap: () => _showSensorDetail(
+                  title: 'Dissolved Oxygen',
+                  value: '${status.dissolvedOxygen.toStringAsFixed(1)} mg/L',
+                  status: getDoStatus(status.dissolvedOxygen),
+                  statusColor: getDoColor(status.dissolvedOxygen),
+                  icon: Icons.water_drop_outlined,
+                  progress: status.dissolvedOxygen / 10.0,
+                  description: 'Dissolved Oxygen (DO) measures the amount of oxygen available in the pond water. Fish need adequate oxygen levels to breathe and survive. Low DO levels can cause stress, reduced growth, or fish kills.',
+                  howItWorks: 'A Gravity Analog DO Sensor (on pin A1) measures oxygen concentration in mg/L. The sensor probe is submerged in the pond water and provides real-time readings every 2 seconds.',
+                  threshold: 'Alert when below ${settingsVm.minDissolvedOxygen} mg/L. Critical danger zone is below 4.0 mg/L. Optimal range for most fish is 5.0-8.0 mg/L.',
+                ),
               ),
               SensorCard(
                 title: 'Feed Level',
@@ -287,7 +443,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 icon: Icons.inventory_2_outlined,
                 statusColor: getLevelColor(status.feedLevel),
                 progress: status.feedLevel / 100.0,
-                onTap: widget.onNavigateToSensors,
+                onTap: () => _showSensorDetail(
+                  title: 'Feed Level',
+                  value: '${status.feedLevel}%',
+                  status: status.feedLevel > 20 ? 'SUFFICIENT' : 'REFILL NEEDED',
+                  statusColor: getLevelColor(status.feedLevel),
+                  icon: Icons.inventory_2_outlined,
+                  progress: status.feedLevel / 100.0,
+                  description: 'Feed Level shows the remaining fish pellets in the hopper as a percentage. When the level drops too low, the system alerts you to refill so feeding schedules are not interrupted.',
+                  howItWorks: 'A Load Cell with HX711 amplifier (on pins 10/11) weighs the hopper continuously. The weight is converted to a percentage based on the full hopper capacity (5 kg).',
+                  threshold: 'Alert when below ${settingsVm.lowFeedThreshold}%. Buzzer activates at critical level (below 20%). SMS alert is sent to notify you to refill.',
+                ),
               ),
               SensorCard(
                 title: 'Battery',
@@ -296,7 +462,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 icon: Icons.bolt_outlined,
                 statusColor: getLevelColor(status.batteryStatus),
                 progress: status.batteryStatus / 100.0,
-                onTap: widget.onNavigateToSensors,
+                onTap: () => _showSensorDetail(
+                  title: 'Battery',
+                  value: '${status.batteryStatus}%',
+                  status: status.batteryStatus > 20 ? 'HEALTHY' : 'LOW POWER',
+                  statusColor: getLevelColor(status.batteryStatus),
+                  icon: Icons.bolt_outlined,
+                  progress: status.batteryStatus / 100.0,
+                  description: 'Battery status monitors the 12V battery that powers the entire system. The battery is charged by the solar panel through an MPPT charge controller for sustainable off-grid operation.',
+                  howItWorks: 'A Voltage Sensor (on pin A2) reads the battery voltage through a 5:1 voltage divider. Voltage is mapped to percentage: 14.4V = 100% (full), 11.0V = 0% (empty).',
+                  threshold: 'Alert when below ${settingsVm.lowBatteryThreshold}%. Buzzer activates at critical level (below 25%). Check solar panel connection or replace battery if consistently low.',
+                ),
               ),
 
               const SizedBox(height: 24),
