@@ -578,9 +578,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     int duration = 3;
     bool enabled = true;
 
-    await showDialog<void>(
+    await showGeneralDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curve = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        return SlideTransition(
+          position: Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(curve),
+          child: FadeTransition(opacity: curve, child: child),
+        );
+      },
+      pageBuilder: (ctx, animation, secondaryAnimation) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
           backgroundColor: const Color(0xFF1E293B),
           title: const Text('ADD SCHEDULE', style: TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 1.0)),

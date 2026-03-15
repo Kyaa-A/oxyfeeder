@@ -222,7 +222,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('OxyFeeder'),
+        title: Row(
+          children: [
+            Image.asset('assets/OxyFeeder.png', height: 38),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'OxyFeeder',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                    color: Colors.white,
+                  ),
+                ),
+                Text(
+                  'Aquaculture Monitor',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w400,
+                    letterSpacing: 1.0,
+                    color: Colors.white.withOpacity(0.4),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
         centerTitle: false,
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -431,9 +459,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   statusColor: getDoColor(status.dissolvedOxygen),
                   icon: Icons.water_drop_outlined,
                   progress: status.dissolvedOxygen / 10.0,
-                  description: 'Dissolved Oxygen (DO) measures the amount of oxygen available in the pond water. Fish need adequate oxygen levels to breathe and survive. Low DO levels can cause stress, reduced growth, or fish kills.',
-                  howItWorks: 'A Gravity Analog DO Sensor (on pin A1) measures oxygen concentration in mg/L. The sensor probe is submerged in the pond water and provides real-time readings every 2 seconds.',
-                  threshold: 'Alert when below ${settingsVm.minDissolvedOxygen} mg/L. Critical danger zone is below 4.0 mg/L. Optimal range for most fish is 5.0-8.0 mg/L.',
+                  description: 'Dissolved Oxygen (DO) is the amount of oxygen available in the pond water. Fish need adequate oxygen to breathe and survive. Low DO can cause stress, reduced growth, or fish kills.',
+                  howItWorks: 'An analog DO sensor submerged in the pond measures oxygen concentration in milligrams per liter (mg/L). Readings are updated every 2 seconds and sent to the app in real time.',
+                  threshold: 'Currently set to alert below ${settingsVm.minDissolvedOxygen} mg/L. Optimal range for most freshwater fish is 5.0 - 8.0 mg/L. You can adjust this in Settings > Safety Thresholds.',
                 ),
               ),
               SensorCard(
@@ -450,9 +478,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   statusColor: getLevelColor(status.feedLevel),
                   icon: Icons.inventory_2_outlined,
                   progress: status.feedLevel / 100.0,
-                  description: 'Feed Level shows the remaining fish pellets in the hopper as a percentage. When the level drops too low, the system alerts you to refill so feeding schedules are not interrupted.',
-                  howItWorks: 'A Load Cell with HX711 amplifier (on pins 10/11) weighs the hopper continuously. The weight is converted to a percentage based on the full hopper capacity (5 kg).',
-                  threshold: 'Alert when below ${settingsVm.lowFeedThreshold}%. Buzzer activates at critical level (below 20%). SMS alert is sent to notify you to refill.',
+                  description: 'Feed Level shows the remaining fish pellets in the hopper as a percentage. When it drops too low, the system sends an alert so you can refill before the next scheduled feeding.',
+                  howItWorks: 'A load cell sensor weighs the hopper continuously and converts the weight to a percentage based on the full capacity. Readings are updated in real time.',
+                  threshold: 'Currently set to alert below ${settingsVm.lowFeedThreshold}%. The buzzer will also sound at critical levels. You can adjust this in Settings > Safety Thresholds.',
                 ),
               ),
               SensorCard(
@@ -469,9 +497,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   statusColor: getLevelColor(status.batteryStatus),
                   icon: Icons.bolt_outlined,
                   progress: status.batteryStatus / 100.0,
-                  description: 'Battery status monitors the 12V battery that powers the entire system. The battery is charged by the solar panel through an MPPT charge controller for sustainable off-grid operation.',
-                  howItWorks: 'A Voltage Sensor (on pin A2) reads the battery voltage through a 5:1 voltage divider. Voltage is mapped to percentage: 14.4V = 100% (full), 11.0V = 0% (empty).',
-                  threshold: 'Alert when below ${settingsVm.lowBatteryThreshold}%. Buzzer activates at critical level (below 25%). Check solar panel connection or replace battery if consistently low.',
+                  description: 'Battery monitors the 12V battery that powers the entire system. The battery is charged by the solar panel through a charge controller for sustainable off-grid operation.',
+                  howItWorks: 'A voltage sensor continuously monitors the battery level. The voltage is converted to a percentage where 14.4V is fully charged and 11.0V is empty.',
+                  threshold: 'Currently set to alert below ${settingsVm.lowBatteryThreshold}%. The buzzer will also sound at critical levels. You can adjust this in Settings > Safety Thresholds.',
                 ),
               ),
 

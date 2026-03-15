@@ -13,25 +13,34 @@ class MainNavHost extends StatefulWidget {
 class _MainNavHostState extends State<MainNavHost> {
   int _currentIndex = 0;
 
-  void _navigateToTab(int index) {
-    setState(() => _currentIndex = index);
+  late final List<Widget> _screens;
+
+  @override
+  void initState() {
+    super.initState();
+    _screens = [
+      DashboardScreen(onNavigateToSensors: () => _onTabTapped(1)),
+      const SensorsScreen(),
+      const SettingsScreen(),
+    ];
   }
 
-  List<Widget> get _screens => <Widget>[
-    DashboardScreen(onNavigateToSensors: () => _navigateToTab(1)),
-    const SensorsScreen(),
-    const SettingsScreen(),
-  ];
+  void _onTabTapped(int index) {
+    if (index != _currentIndex) {
+      setState(() => _currentIndex = index);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_currentIndex],
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (int index) {
-          setState(() => _currentIndex = index);
-        },
+        onTap: _onTabTapped,
         backgroundColor: const Color(0xFF0F172A), // Slate 900
         selectedItemColor: const Color(0xFF14B8A6), // Teal 500
         unselectedItemColor: Colors.white38,
@@ -59,5 +68,3 @@ class _MainNavHostState extends State<MainNavHost> {
     );
   }
 }
-
-
