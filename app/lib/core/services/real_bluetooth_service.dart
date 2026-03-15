@@ -289,18 +289,8 @@ class RealBluetoothService implements BluetoothServiceInterface {
     if (_dataCharacteristic == null) return;
 
     try {
-      // Small delay before enabling notifications
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Enable notifications
-      print('RealBluetoothService: Enabling notifications...');
-      await _dataCharacteristic!.setNotifyValue(true);
-      print('RealBluetoothService: Notifications enabled');
-
-      // Another delay after enabling
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Listen to incoming data using onValueReceived instead of lastValueStream
+      // Subscribe to onValueReceived BEFORE enabling notifications
+      // (flutter_blue_plus requires listener to be set up first)
       _notificationSubscription =
           _dataCharacteristic!.onValueReceived.listen((data) {
         if (data.isNotEmpty) {
@@ -311,9 +301,46 @@ class RealBluetoothService implements BluetoothServiceInterface {
       }, cancelOnError: false);
 
       print('RealBluetoothService: Listening to data stream');
+
+      // Small delay before enabling notifications
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Enable notifications
+      print('RealBluetoothService: Enabling notifications...');
+      await _dataCharacteristic!.setNotifyValue(true);
+      print('RealBluetoothService: Notifications enabled');
+
+      // Also start a polling fallback - read the characteristic every 2 seconds
+      // in case notifications aren't being delivered
+      _startPollingFallback();
     } catch (e) {
       print('RealBluetoothService: Error setting up notifications: $e');
     }
+  }
+
+  Timer? _pollingTimer;
+
+  /// Fallback: poll the characteristic value periodically
+  void _startPollingFallback() {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (_dataCharacteristic == null || _currentState != BleConnectionState.connected) {
+        _pollingTimer?.cancel();
+        return;
+      }
+      try {
+        final value = await _dataCharacteristic!.read();
+        if (value.isNotEmpty) {
+          final jsonString = utf8.decode(value);
+          print('RealBluetoothService: Poll read: $jsonString');
+          final json = jsonDecode(jsonString) as Map<String, dynamic>;
+          final status = OxyFeederStatus.fromJson(json);
+          _statusStreamController.add(status);
+        }
+      } catch (e) {
+        // Ignore read errors
+      }
+    });
   }
 
   /// Parse JSON data from ESP32 and emit OxyFeederStatus
@@ -334,6 +361,7 @@ class RealBluetoothService implements BluetoothServiceInterface {
   /// Handle disconnection - attempt reconnect
   void _handleDisconnection() {
     print('RealBluetoothService: Handling disconnection...');
+    _pollingTimer?.cancel();
     _notificationSubscription?.cancel();
     _notificationSubscription = null;
     _dataCharacteristic = null;
@@ -426,6 +454,7 @@ class RealBluetoothService implements BluetoothServiceInterface {
   @override
   void dispose() {
     print('RealBluetoothService: Disposing...');
+    _pollingTimer?.cancel();
     disconnect();
     _statusStreamController.close();
     _connectionStateController.close();

@@ -632,7 +632,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           value: minute,
                           dropdownColor: const Color(0xFF1E293B),
                           style: const TextStyle(color: Colors.white, fontSize: 16, fontFamily: 'RobotoMono'),
-                          items: [0, 15, 30, 45]
+                          items: List.generate(60, (i) => i)
                               .map((m) => DropdownMenuItem(value: m, child: Text(m.toString().padLeft(2, '0'))))
                               .toList(),
                           onChanged: (v) => setState(() => minute = v!),

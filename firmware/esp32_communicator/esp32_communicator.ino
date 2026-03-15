@@ -1,21 +1,23 @@
 /*
   ESP32 Communicator - BLE Bridge for OxyFeeder
-  
+
   This ESP32 firmware acts as a communication bridge between the Arduino Mega
   and mobile devices. It receives JSON data from the Arduino via Serial2 and
   broadcasts it over Bluetooth Low Energy (BLE) to the mobile app.
-  
+
   It also RECEIVES commands from the app and forwards them to Arduino.
-  
+  Schedule management: ESP32 stores feeding schedules from the app and
+  triggers feeds autonomously via GPIO pulse at the scheduled times.
+
   Hardware Setup:
   - ESP32 receives data from Arduino Mega via Serial2 (hardware serial)
   - ESP32 broadcasts data over BLE to mobile devices
   - ESP32 receives commands from app via BLE and forwards to Arduino
   - USB Serial available for debugging
-  
-  Data Flow: 
-    Arduino (Serial1) -> ESP32 (Serial2) -> BLE -> Mobile App (sensor data)
-    Mobile App -> BLE -> ESP32 -> Serial2 -> Arduino (commands)
+
+  Data Flow:
+    Arduino (Serial) -> ESP32 (Serial2 RX=GPIO26) -> BLE -> Mobile App (sensor data)
+    Mobile App -> BLE -> ESP32 -> GPIO pulse -> Arduino (commands)
 */
 
 // ----------------------------------------------------------------------------
@@ -55,6 +57,161 @@ const int MAX_DATA_LENGTH = 200; // Maximum expected JSON string length
 #define CMD_SMS_PIN 5    // GPIO5, wire to Arduino Pin 2
 
 // ----------------------------------------------------------------------------
+// Schedule Management
+// ----------------------------------------------------------------------------
+
+struct FeedSchedule {
+  int hour;       // 0-23 (24h format)
+  int minute;     // 0-59
+  int duration;   // seconds
+  bool enabled;
+};
+
+#define MAX_SCHEDULES 10
+FeedSchedule schedules[MAX_SCHEDULES];
+int scheduleCount = 0;
+
+// Time tracking (synced from phone)
+bool timeSynced = false;
+unsigned long timeSyncMillis = 0;  // millis() when time was synced
+int syncHour = 0, syncMinute = 0, syncSecond = 0;
+
+// Feed lock to prevent re-triggering in the same minute
+int lastFedHour = -1, lastFedMinute = -1;
+
+// Get current time based on sync
+void getCurrentTime(int &h, int &m, int &s) {
+  if (!timeSynced) { h = -1; m = -1; s = -1; return; }
+
+  unsigned long elapsed = (millis() - timeSyncMillis) / 1000; // seconds since sync
+  unsigned long totalSeconds = syncHour * 3600UL + syncMinute * 60UL + syncSecond + elapsed;
+  totalSeconds %= 86400UL; // wrap at 24 hours
+
+  h = totalSeconds / 3600;
+  m = (totalSeconds % 3600) / 60;
+  s = totalSeconds % 60;
+}
+
+// Parse time label like "08:00 AM" or "05:30 PM" into 24h format
+bool parseTimeLabel(String label, int &hour, int &minute) {
+  // Format: "HH:MM AM" or "HH:MM PM"
+  int colonIdx = label.indexOf(':');
+  if (colonIdx < 0) return false;
+
+  hour = label.substring(0, colonIdx).toInt();
+  minute = label.substring(colonIdx + 1, colonIdx + 3).toInt();
+
+  // Check for AM/PM
+  label.toUpperCase();
+  if (label.indexOf("PM") >= 0 && hour != 12) hour += 12;
+  if (label.indexOf("AM") >= 0 && hour == 12) hour = 0;
+
+  return (hour >= 0 && hour < 24 && minute >= 0 && minute < 60);
+}
+
+// Process schedule-related commands from app
+void processScheduleCommand(String cmd) {
+  if (cmd.startsWith("SYNC_TIME:")) {
+    // Format: SYNC_TIME:HH:MM:SS
+    String timeStr = cmd.substring(10);
+    int c1 = timeStr.indexOf(':');
+    int c2 = timeStr.indexOf(':', c1 + 1);
+    if (c1 > 0 && c2 > 0) {
+      syncHour = timeStr.substring(0, c1).toInt();
+      syncMinute = timeStr.substring(c1 + 1, c2).toInt();
+      syncSecond = timeStr.substring(c2 + 1).toInt();
+      timeSyncMillis = millis();
+      timeSynced = true;
+      Serial.print("Time synced: ");
+      Serial.print(syncHour); Serial.print(":");
+      Serial.print(syncMinute); Serial.print(":");
+      Serial.println(syncSecond);
+    }
+  }
+  else if (cmd.startsWith("CLEAR_SCHEDULES")) {
+    scheduleCount = 0;
+    lastFedHour = -1;
+    lastFedMinute = -1;
+    Serial.println("All schedules cleared");
+  }
+  else if (cmd.startsWith("SCHEDULE:")) {
+    // Format: SCHEDULE:HH:MM AM/PM,duration,enabled
+    // e.g., SCHEDULE:08:00 AM,5,1
+    if (scheduleCount >= MAX_SCHEDULES) {
+      Serial.println("Max schedules reached");
+      return;
+    }
+
+    String data = cmd.substring(9); // after "SCHEDULE:"
+    int comma1 = data.indexOf(',');
+    int comma2 = data.indexOf(',', comma1 + 1);
+
+    if (comma1 < 0 || comma2 < 0) {
+      Serial.println("Invalid schedule format");
+      return;
+    }
+
+    String timeLabel = data.substring(0, comma1);
+    int duration = data.substring(comma1 + 1, comma2).toInt();
+    int enabled = data.substring(comma2 + 1).toInt();
+
+    int hour, minute;
+    if (!parseTimeLabel(timeLabel, hour, minute)) {
+      Serial.println("Invalid time in schedule");
+      return;
+    }
+
+    schedules[scheduleCount].hour = hour;
+    schedules[scheduleCount].minute = minute;
+    schedules[scheduleCount].duration = duration;
+    schedules[scheduleCount].enabled = (enabled == 1);
+    scheduleCount++;
+
+    Serial.print("Schedule added: ");
+    Serial.print(hour); Serial.print(":"); Serial.print(minute);
+    Serial.print(" dur="); Serial.print(duration);
+    Serial.print(" en="); Serial.println(enabled);
+  }
+}
+
+// Check if it's time to feed
+void checkSchedules() {
+  if (!timeSynced || scheduleCount == 0) return;
+
+  int h, m, s;
+  getCurrentTime(h, m, s);
+  if (h < 0) return;
+
+  for (int i = 0; i < scheduleCount; i++) {
+    if (!schedules[i].enabled) continue;
+
+    if (h == schedules[i].hour && m == schedules[i].minute && s < 10) {
+      // Don't re-trigger in same minute
+      if (h == lastFedHour && m == lastFedMinute) continue;
+
+      lastFedHour = h;
+      lastFedMinute = m;
+
+      Serial.print("SCHEDULED FEED at ");
+      Serial.print(h); Serial.print(":"); Serial.println(m);
+
+      // Pulse feed GPIO (same as Feed Now)
+      digitalWrite(CMD_FEED_PIN, HIGH);
+      delay(500);
+      digitalWrite(CMD_FEED_PIN, LOW);
+      Serial.println("Pulsed FEED pin HIGH for 500ms (scheduled)");
+      break;
+    }
+  }
+
+  // Reset feed lock after the minute passes
+  if (s >= 30) {
+    lastFedHour = -1;
+    lastFedMinute = -1;
+  }
+}
+
+// ----------------------------------------------------------------------------
 // 4) BLE Callback Classes
 // ----------------------------------------------------------------------------
 
@@ -74,11 +231,11 @@ class MyServerCallbacks: public BLEServerCallbacks {
 class CommandCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
       String rxValue = pCharacteristic->getValue().c_str();
-      
+
       if (rxValue.length() > 0) {
         Serial.print("Received command from app: ");
         Serial.println(rxValue);
-        
+
         // Forward command to Arduino via GPIO pulse
         if (rxValue.startsWith("FEED")) {
           digitalWrite(CMD_FEED_PIN, HIGH);
@@ -90,10 +247,11 @@ class CommandCallbacks: public BLECharacteristicCallbacks {
           delay(500);
           digitalWrite(CMD_SMS_PIN, LOW);
           Serial.println("Pulsed SMS pin HIGH for 500ms");
+        } else if (rxValue.startsWith("SYNC_TIME") || rxValue.startsWith("SCHEDULE") || rxValue.startsWith("CLEAR_SCHEDULES")) {
+          processScheduleCommand(rxValue);
         } else {
-          Serial.print("Forwarded via Serial2: ");
+          Serial.print("Unknown command: ");
           Serial.println(rxValue);
-          Serial2.println(rxValue);
         }
       }
     }
@@ -107,19 +265,19 @@ void setup() {
   // Initialize USB Serial for debugging
   Serial.begin(115200);
   delay(500); // Short delay for serial to settle (no blocking wait)
-  
+
   // Serial2: RX only from Arduino
-  Serial2.begin(9600, SERIAL_8N1, 16, -1); // RX=16, no TX
+  Serial2.begin(9600, SERIAL_8N1, 26, -1); // RX=26 (GPIO16/13/4 all failed on this module)
 
   // Command GPIO pins
   pinMode(CMD_FEED_PIN, OUTPUT);
   pinMode(CMD_SMS_PIN, OUTPUT);
-  digitalWrite(CMD_FEED_PIN, LOW);
-  digitalWrite(CMD_SMS_PIN, LOW);
-  
-  Serial.println("ESP32 OxyFeeder Communicator v2.0 Starting...");
+  digitalWrite(CMD_FEED_PIN, LOW);   // Idle LOW (Arduino has 1K pull-down, detects HIGH pulse)
+  digitalWrite(CMD_SMS_PIN, LOW);    // Idle LOW (Arduino has 1K pull-down, detects HIGH pulse)
+
+  Serial.println("ESP32 OxyFeeder Communicator v3.0 Starting...");
   Serial.println("Serial2 initialized for Arduino communication");
-  
+
   // Initialize BLE
   BLEDevice::init("OxyFeeder");
   pServer = BLEDevice::createServer();
@@ -135,7 +293,7 @@ void setup() {
                       BLECharacteristic::PROPERTY_NOTIFY
                     );
   pCharacteristic->addDescriptor(new BLE2902());
-  
+
   // Create BLE Characteristic for receiving commands FROM app (WRITE)
   pCommandCharacteristic = pService->createCharacteristic(
                       COMMAND_CHAR_UUID,
@@ -143,17 +301,17 @@ void setup() {
                       BLECharacteristic::PROPERTY_WRITE_NR
                     );
   pCommandCharacteristic->setCallbacks(new CommandCallbacks());
-  
+
   // Start the service
   pService->start();
-  
+
   // Start advertising
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(false);
   pAdvertising->setMinPreferred(0x0);
   BLEDevice::startAdvertising();
-  
+
   Serial.println("BLE Server Started - Advertising as 'OxyFeeder'");
   Serial.println("Data Characteristic: " CHARACTERISTIC_UUID);
   Serial.println("Command Characteristic: " COMMAND_CHAR_UUID);
@@ -165,26 +323,58 @@ void setup() {
 // ----------------------------------------------------------------------------
 
 void loop() {
+  // Debug: print heartbeat every 5 seconds to confirm loop is running
+  static unsigned long lastDebug = 0;
+  if (millis() - lastDebug > 5000) {
+    lastDebug = millis();
+    Serial.print("[DEBUG] Loop alive. Serial2 available: ");
+    Serial.print(Serial2.available());
+    Serial.print(" | Pin26: ");
+    Serial.print(digitalRead(26));
+
+    // Show time and schedule count
+    if (timeSynced) {
+      int h, m, s;
+      getCurrentTime(h, m, s);
+      Serial.print(" | Time: ");
+      if (h < 10) Serial.print("0");
+      Serial.print(h); Serial.print(":");
+      if (m < 10) Serial.print("0");
+      Serial.print(m); Serial.print(":");
+      if (s < 10) Serial.print("0");
+      Serial.print(s);
+    }
+    Serial.print(" | Schedules: ");
+    Serial.println(scheduleCount);
+  }
+
+  // Check feeding schedules
+  checkSchedules();
+
   // Check for incoming data from Arduino via Serial2
   if (Serial2.available()) {
     char incomingChar = Serial2.read();
-    
+
     // Build complete JSON string
     if (incomingChar == '\n' || incomingChar == '\r') {
       // End of JSON string received
       if (receivedData.length() > 0) {
-        Serial.print("Received from Arduino: ");
-        Serial.println(receivedData);
-        
-        // Update BLE characteristic if device is connected
-        if (deviceConnected) {
-          pCharacteristic->setValue(receivedData.c_str());
-          pCharacteristic->notify();
-          Serial.println("Data sent to mobile app via BLE");
-        } else {
-          Serial.println("No BLE client connected - data not sent");
+        // Only forward lines that start with '{' (JSON data)
+        // Pin 1 also sends debug text - filter it out
+        if (receivedData.charAt(0) == '{') {
+          Serial.print("JSON from Arduino: ");
+          Serial.println(receivedData);
+
+          // Update BLE characteristic if device is connected
+          if (deviceConnected) {
+            pCharacteristic->setValue(receivedData.c_str());
+            pCharacteristic->notify();
+            Serial.println("Data sent to mobile app via BLE");
+          } else {
+            Serial.println("No BLE client connected - data not sent");
+          }
         }
-        
+
         // Clear buffer for next message
         receivedData = "";
       }
@@ -195,7 +385,7 @@ void loop() {
       }
     }
   }
-  
+
   // Handle BLE connection status changes
   if (!deviceConnected && oldDeviceConnected) {
     // Client disconnected - restart advertising
@@ -204,12 +394,16 @@ void loop() {
     Serial.println("Restarting BLE advertising");
     oldDeviceConnected = deviceConnected;
   }
-  
+
   if (deviceConnected && !oldDeviceConnected) {
-    // Client connected
+    // Client just connected - send a welcome message to confirm BLE works
+    delay(1000); // Give client time to set up notifications
+    pCharacteristic->setValue("{\"do\": 0.1, \"feed\": 1, \"battery\": 1}");
+    pCharacteristic->notify();
+    Serial.println("Sent welcome data to new BLE client");
     oldDeviceConnected = deviceConnected;
   }
-  
+
   // Small delay to prevent overwhelming the system
   delay(10);
 }

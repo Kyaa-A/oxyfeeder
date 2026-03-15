@@ -40,6 +40,8 @@ class DashboardViewModel extends ChangeNotifier {
       if (state == BleConnectionState.connected && !wasConnected) {
         wasConnected = true;
         _eventLogService?.logConnected();
+        // Sync time + schedules to ESP32 on connect
+        _settingsViewModel?.syncAllToDevice();
       } else if (state == BleConnectionState.disconnected && wasConnected) {
         wasConnected = false;
         _eventLogService?.logDisconnected();

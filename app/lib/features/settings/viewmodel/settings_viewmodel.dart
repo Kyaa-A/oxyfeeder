@@ -260,18 +260,34 @@ class SettingsViewModel extends ChangeNotifier {
     print('SettingsViewModel: Synced all ${_appSettings.feedingSchedules.length} schedules to device');
   }
 
+  /// Sync current time to ESP32 (so it can track schedules autonomously)
+  Future<void> _syncTimeToDevice() async {
+    if (_bluetoothService == null) return;
+
+    final now = DateTime.now();
+    final command = 'SYNC_TIME:${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    final success = await _bluetoothService!.sendCommand(command);
+    if (success) {
+      print('SettingsViewModel: Time synced to device: $command');
+    }
+  }
+
   /// Sync all settings to device (call after connecting)
   Future<void> syncAllToDevice() async {
     if (_bluetoothService == null) return;
-    
+
+    // Sync time first (ESP32 needs this for schedule checking)
+    await _syncTimeToDevice();
+    await Future.delayed(const Duration(milliseconds: 100));
+
     // Sync phone number
     if (_smsPhoneNumber.isNotEmpty) {
       await sendPhoneNumberToDevice();
     }
-    
+
     // Sync all schedules
     await _syncAllSchedulesToDevice();
-    
+
     print('SettingsViewModel: Full sync complete');
   }
 }

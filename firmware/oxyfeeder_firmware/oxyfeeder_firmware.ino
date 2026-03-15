@@ -44,7 +44,7 @@
 // ============================================================================
 // ALPHA TESTING MODE - Disable LCD to prevent white screen issues
 // ============================================================================
-#define ALPHA_MODE true  // Set to false when LCD is working
+#define ALPHA_MODE false  // Set to false when LCD is working
 
 // Color Definitions (RGB565 format)
 #define BLACK   0x0000
@@ -233,8 +233,8 @@ void setup() {
   // Initialize Serial ports
   Serial.begin(9600);       // USB Debug
   Serial1.begin(9600);      // ESP32 Data Output (TX1=Pin18 → ESP32 RX)
-  pinMode(17, INPUT);       // Feed command from ESP32 GPIO2
-  pinMode(2, INPUT);        // SMS command from ESP32 GPIO5
+  pinMode(17, INPUT); // Feed command from ESP32 GPIO2 (external 10K pull-down installed)
+  pinMode(2, INPUT);  // SMS command from ESP32 GPIO5 (external 10K pull-down installed)
   Serial3.begin(9600);      // GSM Module (SIM800L)
   
   while (!Serial) {
@@ -246,6 +246,10 @@ void setup() {
   Serial.println(F("  OxyFeeder Firmware v2.0 - PRODUCTION BUILD  "));
   Serial.println(F("=============================================="));
   Serial.println(F(""));
+
+  // DEBUG: Send test string on Serial1 to verify Pin 18 TX works
+  Serial1.println(F("{\"test\":\"serial1_alive\"}"));
+  Serial.println(F("[DEBUG] Sent test JSON on Serial1 (Pin 18)"));
   
   // Initialize all subsystems
   loadPhoneNumberFromEEPROM();  // Load saved phone number
@@ -354,10 +358,9 @@ void initSensors() {
   if (rtc.begin()) {
     rtcAvailable = true;
     
-    // Check if RTC lost power and needs to be set
+    // Only set RTC if it lost power (battery died)
     if (rtc.lostPower()) {
       Serial.println(F("RTC lost power, setting to compile time!"));
-      // Set RTC to compile time - you may want to manually set this
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
     }
     
@@ -770,56 +773,7 @@ void updateDisplay() {
   tft->setTextSize(2);
   tft->setTextColor(WHITE);
   tft->setCursor(15, 292);
-  tft->print(F("Next Feed: "));
-
-  // Calculate next feeding time
-  if (rtcAvailable) {
-    int currentMinutes = currentTime.hour() * 60 + currentTime.minute();
-    int nextFeedHour = -1;
-    int nextFeedMin = -1;
-
-    if (scheduleCount > 0) {
-      int minDistance = 24 * 60;
-      for (int i = 0; i < scheduleCount; i++) {
-        if (!schedules[i].enabled) continue;
-        int schedMinutes = schedules[i].hour * 60 + schedules[i].minute;
-        int distance = schedMinutes - currentMinutes;
-        if (distance < 0) distance += 24 * 60;
-        if (distance < minDistance) {
-          minDistance = distance;
-          nextFeedHour = schedules[i].hour;
-          nextFeedMin = schedules[i].minute;
-        }
-      }
-    } else if (!appSchedulesSynced) {
-      int feed1Minutes = DEFAULT_FEED_HOUR_1 * 60 + DEFAULT_FEED_MIN_1;
-      int feed2Minutes = DEFAULT_FEED_HOUR_2 * 60 + DEFAULT_FEED_MIN_2;
-
-      if (currentMinutes < feed1Minutes) {
-        nextFeedHour = DEFAULT_FEED_HOUR_1;
-        nextFeedMin = DEFAULT_FEED_MIN_1;
-      } else if (currentMinutes < feed2Minutes) {
-        nextFeedHour = DEFAULT_FEED_HOUR_2;
-        nextFeedMin = DEFAULT_FEED_MIN_2;
-      } else {
-        nextFeedHour = DEFAULT_FEED_HOUR_1;
-        nextFeedMin = DEFAULT_FEED_MIN_1;
-        tft->print(F("Tmrw "));
-      }
-    }
-
-    if (nextFeedHour >= 0) {
-      if (nextFeedHour < 10) tft->print(F("0"));
-      tft->print(nextFeedHour);
-      tft->print(F(":"));
-      if (nextFeedMin < 10) tft->print(F("0"));
-      tft->print(nextFeedMin);
-    } else {
-      tft->print(F("Disabled"));
-    }
-  } else {
-    tft->print(F("--:--"));
-  }
+  tft->print(F("Schedule: Managed by App"));
 }
 #endif  // !ALPHA_MODE
 
@@ -828,9 +782,21 @@ void updateDisplay() {
 // ============================================================================
 
 void sendJsonToESP32() {
-  // Build JSON string matching the expected format
-  Serial1.print(F("{"));
-  Serial1.print(F("\"do\": "));
+  // Build JSON string and send on BOTH Serial (Pin 1) and Serial1 (Pin 18)
+  // Pin 1 goes direct wire to ESP32 D26 (logic shifter on Pin 18 failed)
+  // ESP32 filters for lines starting with '{' to ignore debug text
+
+  // Send on Serial (Pin 1) - this is the working path to ESP32
+  Serial.print(F("{\"do\": "));
+  Serial.print(currentDissolvedOxygen, 1);
+  Serial.print(F(", \"feed\": "));
+  Serial.print(currentFeedLevel);
+  Serial.print(F(", \"battery\": "));
+  Serial.print(currentBatteryPercent);
+  Serial.println(F("}"));
+
+  // Also send on Serial1 (Pin 18) in case it works later
+  Serial1.print(F("{\"do\": "));
   Serial1.print(currentDissolvedOxygen, 1);
   Serial1.print(F(", \"feed\": "));
   Serial1.print(currentFeedLevel);
@@ -888,25 +854,9 @@ void checkFeedingSchedule() {
   
   bool shouldFeed = false;
   
-  // Check dynamic schedules from app
-  if (scheduleCount > 0) {
-    for (int i = 0; i < scheduleCount; i++) {
-      if (schedules[i].enabled && 
-          schedules[i].hour == hour && 
-          schedules[i].minute == minute && 
-          second < 10) {
-        shouldFeed = true;
-        break;
-      }
-    }
-  } else if (!appSchedulesSynced) {
-    // Only use defaults if app has NEVER synced schedules
-    // Once app syncs (even with empty list), defaults are disabled
-    bool isFeedTime1 = (hour == DEFAULT_FEED_HOUR_1 && minute == DEFAULT_FEED_MIN_1 && second < 10);
-    bool isFeedTime2 = (hour == DEFAULT_FEED_HOUR_2 && minute == DEFAULT_FEED_MIN_2 && second < 10);
-    shouldFeed = isFeedTime1 || isFeedTime2;
-  }
-  // If appSchedulesSynced is true but scheduleCount is 0, no feeding happens
+  // All scheduling is handled by ESP32 (synced from app via BLE)
+  // ESP32 pulses GPIO pin 17 at scheduled times
+  // Arduino just responds to the GPIO pulse in processIncomingCommands()
   
   if (shouldFeed && !lastFeedingDone) {
     Serial.println(F(""));
@@ -1000,29 +950,29 @@ void processIncomingCommands() {
   // --- GPIO commands from ESP32 ---
   // Skip GPIO checks for first 15 seconds after boot (avoid startup noise)
   static unsigned long bootTime = millis();
-  static bool feedReady = true;   // Must see pin LOW before allowing trigger
+  static bool feedReady = true;   // Ready by default (pin is LOW at idle via pull-down)
   static bool smsReady = true;
 
   if (now - bootTime < 15000) return;  // Skip during startup
 
-  // Feed command: ESP32 GPIO2 → Arduino Pin 17
+  // Feed command: ESP32 GPIO2 → Arduino Pin 17 (active HIGH pulse, 1K pull-down)
   bool feedPin = digitalRead(17);
   if (feedPin == LOW) {
-    feedReady = true;  // Pin confirmed LOW, ready for next trigger
+    feedReady = true;  // Pin is idle (pulled down), ready for next trigger
   }
   if (feedPin == HIGH && feedReady) {
-    feedReady = false;  // Lock until pin goes LOW again
+    feedReady = false;  // Lock until pin returns to LOW
     Serial.println(F("[COMMAND] Feed trigger from ESP32!"));
     dispenseFeed(5);
   }
 
-  // SMS command: ESP32 GPIO5 → Arduino Pin 2
+  // SMS command: ESP32 GPIO5 → Arduino Pin 2 (active HIGH pulse, 1K pull-down)
   bool smsPin = digitalRead(2);
   if (smsPin == LOW) {
-    smsReady = true;
+    smsReady = true;  // Pin is idle (pulled down), ready for next trigger
   }
   if (smsPin == HIGH && smsReady) {
-    smsReady = false;
+    smsReady = false;  // Lock until pin returns to LOW
     Serial.println(F("[COMMAND] SMS trigger from ESP32!"));
     sendSMS("OxyFeeder Test: SMS system is working!");
   }
