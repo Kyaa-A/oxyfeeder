@@ -24,6 +24,10 @@ class DashboardViewModel extends ChangeNotifier {
   bool _lowFeedAlerted = false;
   bool _lowBatteryAlerted = false;
 
+  // Active alerts exposed to UI
+  List<String> _activeAlerts = [];
+  List<String> get activeAlerts => _activeAlerts;
+
   DashboardViewModel(this._bluetoothService) {
     _statusSubscription = _bluetoothService.statusStream.listen((event) {
       updateStatus(event);
@@ -67,9 +71,11 @@ class DashboardViewModel extends ChangeNotifier {
     final minDO = _settingsViewModel!.minDissolvedOxygen;
     final lowFeed = _settingsViewModel!.lowFeedThreshold;
     final lowBattery = _settingsViewModel!.lowBatteryThreshold;
+    final alerts = <String>[];
 
     // Check DO threshold
     if (status.dissolvedOxygen > 0 && status.dissolvedOxygen < minDO) {
+      alerts.add('Low Dissolved Oxygen: ${status.dissolvedOxygen.toStringAsFixed(1)} mg/L');
       if (!_lowOxygenAlerted) {
         _lowOxygenAlerted = true;
         _eventLogService!.logLowOxygen(status.dissolvedOxygen);
@@ -80,6 +86,7 @@ class DashboardViewModel extends ChangeNotifier {
 
     // Check feed level threshold
     if (status.feedLevel < lowFeed && status.feedLevel >= 0) {
+      alerts.add('Low Feed Level: ${status.feedLevel}%');
       if (!_lowFeedAlerted) {
         _lowFeedAlerted = true;
         _eventLogService!.logLowFeed(status.feedLevel);
@@ -90,6 +97,7 @@ class DashboardViewModel extends ChangeNotifier {
 
     // Check battery threshold
     if (status.batteryStatus > 0 && status.batteryStatus < lowBattery) {
+      alerts.add('Low Battery: ${status.batteryStatus}%');
       if (!_lowBatteryAlerted) {
         _lowBatteryAlerted = true;
         _eventLogService!.logLowBattery(status.batteryStatus);
@@ -97,6 +105,8 @@ class DashboardViewModel extends ChangeNotifier {
     } else {
       _lowBatteryAlerted = false;
     }
+
+    _activeAlerts = alerts;
   }
 
   @override

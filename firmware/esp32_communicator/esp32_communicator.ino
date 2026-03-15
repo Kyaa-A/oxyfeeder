@@ -79,6 +79,74 @@ int syncHour = 0, syncMinute = 0, syncSecond = 0;
 // Feed lock to prevent re-triggering in the same minute
 int lastFedHour = -1, lastFedMinute = -1;
 
+// ----------------------------------------------------------------------------
+// Threshold Monitoring (synced from app, checked against sensor data)
+// ----------------------------------------------------------------------------
+
+// Defaults match Arduino hardcoded values (safety fallback)
+float thresholdDO = 4.0;       // mg/L - alert below this
+int thresholdFeed = 20;        // % - alert below this
+int thresholdBattery = 25;     // % - alert below this
+
+// Alert throttle
+unsigned long lastAlertSMS = 0;
+const unsigned long ALERT_SMS_COOLDOWN = 300000;  // 5 minutes between alert SMS
+
+// Simple JSON value parser (avoids needing ArduinoJson library)
+float parseJsonFloat(String json, String key) {
+  String search = "\"" + key + "\":";
+  int idx = json.indexOf(search);
+  if (idx < 0) {
+    search = "\"" + key + "\": ";
+    idx = json.indexOf(search);
+  }
+  if (idx < 0) return -1;
+  int start = idx + search.length();
+  while (start < (int)json.length() && json.charAt(start) == ' ') start++;
+  int end = start;
+  while (end < (int)json.length() && (isDigit(json.charAt(end)) || json.charAt(end) == '.')) end++;
+  if (end == start) return -1;
+  return json.substring(start, end).toFloat();
+}
+
+void checkThresholdsFromJSON(String json) {
+  float doVal = parseJsonFloat(json, "do");
+  float feedVal = parseJsonFloat(json, "feed");
+  float batteryVal = parseJsonFloat(json, "battery");
+
+  bool alert = false;
+  String reason = "";
+
+  if (doVal > 0 && doVal < thresholdDO) {
+    alert = true;
+    reason = "Low DO";
+  }
+  if (feedVal >= 0 && feedVal < thresholdFeed) {
+    alert = true;
+    if (reason.length() > 0) reason += "+";
+    reason += "Low Feed";
+  }
+  if (batteryVal > 0 && batteryVal < thresholdBattery) {
+    alert = true;
+    if (reason.length() > 0) reason += "+";
+    reason += "Low Battery";
+  }
+
+  if (alert) {
+    unsigned long now = millis();
+    if (now - lastAlertSMS >= ALERT_SMS_COOLDOWN || lastAlertSMS == 0) {
+      lastAlertSMS = now;
+      Serial.print("THRESHOLD ALERT: ");
+      Serial.println(reason);
+      // Pulse SMS pin to trigger Arduino SMS
+      digitalWrite(CMD_SMS_PIN, HIGH);
+      delay(500);
+      digitalWrite(CMD_SMS_PIN, LOW);
+      Serial.println("Pulsed SMS pin for threshold alert");
+    }
+  }
+}
+
 // Get current time based on sync
 void getCurrentTime(int &h, int &m, int &s) {
   if (!timeSynced) { h = -1; m = -1; s = -1; return; }
@@ -172,6 +240,28 @@ void processScheduleCommand(String cmd) {
     Serial.print(" dur="); Serial.print(duration);
     Serial.print(" en="); Serial.println(enabled);
   }
+  else if (cmd.startsWith("THRESHOLD:")) {
+    // Format: THRESHOLD:DO,4.0 or THRESHOLD:FEED,55 or THRESHOLD:BATTERY,30
+    String data = cmd.substring(10);
+    int comma = data.indexOf(',');
+    if (comma < 0) {
+      Serial.println("Invalid threshold format");
+      return;
+    }
+    String type = data.substring(0, comma);
+    String val = data.substring(comma + 1);
+
+    if (type == "DO") {
+      thresholdDO = val.toFloat();
+      Serial.print("Threshold DO set: "); Serial.println(thresholdDO);
+    } else if (type == "FEED") {
+      thresholdFeed = val.toInt();
+      Serial.print("Threshold Feed set: "); Serial.println(thresholdFeed);
+    } else if (type == "BATTERY") {
+      thresholdBattery = val.toInt();
+      Serial.print("Threshold Battery set: "); Serial.println(thresholdBattery);
+    }
+  }
 }
 
 // Check if it's time to feed
@@ -247,7 +337,7 @@ class CommandCallbacks: public BLECharacteristicCallbacks {
           delay(500);
           digitalWrite(CMD_SMS_PIN, LOW);
           Serial.println("Pulsed SMS pin HIGH for 500ms");
-        } else if (rxValue.startsWith("SYNC_TIME") || rxValue.startsWith("SCHEDULE") || rxValue.startsWith("CLEAR_SCHEDULES")) {
+        } else if (rxValue.startsWith("SYNC_TIME") || rxValue.startsWith("SCHEDULE") || rxValue.startsWith("CLEAR_SCHEDULES") || rxValue.startsWith("THRESHOLD")) {
           processScheduleCommand(rxValue);
         } else {
           Serial.print("Unknown command: ");
@@ -364,6 +454,9 @@ void loop() {
         if (receivedData.charAt(0) == '{') {
           Serial.print("JSON from Arduino: ");
           Serial.println(receivedData);
+
+          // Check thresholds against synced values from app
+          checkThresholdsFromJSON(receivedData);
 
           // Update BLE characteristic if device is connected
           if (deviceConnected) {

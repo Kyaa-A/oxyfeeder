@@ -171,6 +171,8 @@ unsigned long lastDisplayUpdate = 0;
 unsigned long lastJsonSend = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastWarningPrint = 0;
+unsigned long lastBuzzerAlert = 0;
+const unsigned long BUZZER_ALERT_INTERVAL = 30000;  // Buzzer every 30 seconds during alert
 bool lastFeedingDone = false;  // Prevents repeated feeding in same minute
 
 // SMS cooldown to prevent spam
@@ -879,27 +881,44 @@ void runFeedingSequence() {
 }
 
 void checkSafetyAlerts() {
-  // Check for critical low dissolved oxygen
-  if (false && currentDissolvedOxygen < DO_CRITICAL_THRESHOLD && currentDissolvedOxygen > 0) {
-    Serial.println(F("[ALERT] CRITICAL: Low Dissolved Oxygen!"));
-
-    // Beep alarm
-    triggerAlarm();
-
-    // Send SMS alert
-    sendSMS("CRITICAL ALERT: OxyFeeder - Low Dissolved Oxygen detected! Level is below 4.0 mg/L. Check pond immediately!");
-  }
-  
-  // Check for low battery (warning only, throttled to once per 10 seconds)
+  // NOTE: SMS alerts are now handled by ESP32 (synced thresholds from app).
+  // Arduino only handles buzzer here as a safety fallback with hardcoded thresholds.
   unsigned long nowAlert = millis();
-  if (nowAlert - lastWarningPrint >= 10000) {
-    lastWarningPrint = nowAlert;
-    if (currentBatteryPercent < LOW_BATTERY_THRESHOLD && currentBatteryPercent > 0) {
-      Serial.println(F("[WARNING] Low battery detected"));
+  bool anyAlert = false;
+
+  // Check for critical low dissolved oxygen
+  if (currentDissolvedOxygen < DO_CRITICAL_THRESHOLD && currentDissolvedOxygen > 0) {
+    anyAlert = true;
+    if (nowAlert - lastWarningPrint >= 10000) {
+      Serial.println(F("[ALERT] CRITICAL: Low Dissolved Oxygen!"));
     }
-    if (currentFeedLevel < LOW_FEED_THRESHOLD) {
+  }
+
+  // Check for low feed level
+  if (currentFeedLevel < LOW_FEED_THRESHOLD && currentFeedLevel >= 0) {
+    anyAlert = true;
+    if (nowAlert - lastWarningPrint >= 10000) {
       Serial.println(F("[WARNING] Low feed level detected"));
     }
+  }
+
+  // Check for low battery
+  if (currentBatteryPercent < LOW_BATTERY_THRESHOLD && currentBatteryPercent > 0) {
+    anyAlert = true;
+    if (nowAlert - lastWarningPrint >= 10000) {
+      Serial.println(F("[WARNING] Low battery detected"));
+    }
+  }
+
+  // Update warning print timer
+  if (nowAlert - lastWarningPrint >= 10000) {
+    lastWarningPrint = nowAlert;
+  }
+
+  // Buzzer alert: beep every 30 seconds while any alert is active
+  if (anyAlert && (nowAlert - lastBuzzerAlert >= BUZZER_ALERT_INTERVAL)) {
+    lastBuzzerAlert = nowAlert;
+    triggerAlarm();
   }
 }
 // ============================================================================
@@ -973,8 +992,8 @@ void processIncomingCommands() {
   }
   if (smsPin == HIGH && smsReady) {
     smsReady = false;  // Lock until pin returns to LOW
-    Serial.println(F("[COMMAND] SMS trigger from ESP32!"));
-    sendSMS("OxyFeeder Test: SMS system is working!");
+    Serial.println(F("[COMMAND] SMS alert trigger from ESP32!"));
+    sendSMS("ALERT: OxyFeeder - Safety threshold crossed! Check your system immediately.");
   }
 
   // --- USB Serial commands (for testing via Serial Monitor) ---

@@ -115,18 +115,21 @@ class SettingsViewModel extends ChangeNotifier {
     _appSettings = _appSettings.copyWith(minDissolvedOxygen: value);
     notifyListeners();
     _saveSettings();
+    _syncThresholdsToDevice();
   }
 
   void updateLowFeedThreshold(int value) {
     _appSettings = _appSettings.copyWith(lowFeedThreshold: value);
     notifyListeners();
     _saveSettings();
+    _syncThresholdsToDevice();
   }
 
   void updateLowBatteryThreshold(int value) {
     _appSettings = _appSettings.copyWith(lowBatteryThreshold: value);
     notifyListeners();
     _saveSettings();
+    _syncThresholdsToDevice();
   }
 
   void updateNotificationsEnabled(bool enabled) {
@@ -272,6 +275,18 @@ class SettingsViewModel extends ChangeNotifier {
     }
   }
 
+  /// Sync safety thresholds to ESP32 (so it can trigger SMS alerts with app values)
+  Future<void> _syncThresholdsToDevice() async {
+    if (_bluetoothService == null) return;
+
+    await _bluetoothService!.sendCommand('THRESHOLD:DO,${_appSettings.minDissolvedOxygen}');
+    await Future.delayed(const Duration(milliseconds: 100));
+    await _bluetoothService!.sendCommand('THRESHOLD:FEED,${_appSettings.lowFeedThreshold}');
+    await Future.delayed(const Duration(milliseconds: 100));
+    await _bluetoothService!.sendCommand('THRESHOLD:BATTERY,${_appSettings.lowBatteryThreshold}');
+    print('SettingsViewModel: Thresholds synced to device');
+  }
+
   /// Sync all settings to device (call after connecting)
   Future<void> syncAllToDevice() async {
     if (_bluetoothService == null) return;
@@ -287,6 +302,10 @@ class SettingsViewModel extends ChangeNotifier {
 
     // Sync all schedules
     await _syncAllSchedulesToDevice();
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    // Sync safety thresholds
+    await _syncThresholdsToDevice();
 
     print('SettingsViewModel: Full sync complete');
   }

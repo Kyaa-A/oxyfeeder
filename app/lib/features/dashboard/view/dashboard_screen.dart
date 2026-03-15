@@ -207,6 +207,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 },
               ),
 
+              // Alert Banner (shown when thresholds are crossed)
+              if (vm.activeAlerts.isNotEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF991B1B), // Red-800
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.4)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        color: Color(0xFFFCA5A5), // Red-300
+                        size: 22,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'ALERT',
+                              style: TextStyle(
+                                color: Color(0xFFFCA5A5),
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.0,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            ...vm.activeAlerts.map((alert) => Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text(
+                                alert,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            )),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
               const Text(
                 'SENSORS',
                 style: TextStyle(
