@@ -36,8 +36,8 @@ class AppSettings {
   factory AppSettings.defaults() => const AppSettings(
         feedingSchedules: [],
         minDissolvedOxygen: 4.5,
-        lowFeedThreshold: 20,
-        lowBatteryThreshold: 25,
+        lowFeedThreshold: 10,
+        lowBatteryThreshold: 10,
         notificationsEnabled: true,
       );
 

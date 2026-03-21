@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter_mjpeg/flutter_mjpeg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -35,7 +38,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _loadCameraIp() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedIp = prefs.getString(_cameraIpKey) ?? '';
+    final savedIp = prefs.getString(_cameraIpKey) ?? 'oxyfeeder-cam.local';
     setState(() {
       _cameraIp = savedIp;
       _ipController.text = savedIp;
@@ -401,104 +404,165 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
+  Future<String?> _scanForCamera() async {
+    // Get phone's own IP to determine subnet
+    String subnet = '192.168.1';
+    try {
+      for (var interface in await NetworkInterface.list()) {
+        for (var addr in interface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+            final parts = addr.address.split('.');
+            if (parts.length == 4) {
+              subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Scan all IPs in subnet concurrently with short timeout
+    final futures = <Future<String?>>[];
+    for (int i = 1; i <= 254; i++) {
+      final ip = '$subnet.$i';
+      futures.add(_checkCameraAt(ip));
+    }
+
+    // Return first non-null result
+    final completer = Completer<String?>();
+    int remaining = futures.length;
+    for (final f in futures) {
+      f.then((ip) {
+        if (ip != null && !completer.isCompleted) completer.complete(ip);
+        remaining--;
+        if (remaining == 0 && !completer.isCompleted) completer.complete(null);
+      });
+    }
+    return completer.future;
+  }
+
+  Future<String?> _checkCameraAt(String ip) async {
+    try {
+      final response = await http.get(
+        Uri.parse('http://$ip/'),
+        headers: {'Connection': 'close'},
+      ).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200 && response.body.contains('OxyFeeder')) {
+        return ip;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   void _showSettingsDialog(BuildContext context) {
     _ipController.text = _cameraIp;
+    bool scanning = false;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        title: const Text(
-          'CAMERA SETTINGS',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            letterSpacing: 1.0,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: const Text(
+            'CAMERA SETTINGS',
+            style: TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 1.0),
           ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Enter the IP address of your ESP32-CAM.\nCheck Serial Monitor for the IP after WiFi connects.',
-              style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _ipController,
-              style: const TextStyle(color: Colors.white, fontFamily: 'RobotoMono', fontSize: 14),
-              decoration: InputDecoration(
-                labelText: 'Camera IP Address',
-                labelStyle: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
-                hintText: '192.168.1.100',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.2)),
-                prefixIcon: Icon(Icons.wifi, color: Colors.white.withOpacity(0.4), size: 20),
-                filled: true,
-                fillColor: Colors.black.withOpacity(0.3),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF14B8A6)),
-                ),
-              ),
-              keyboardType: TextInputType.number,
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF14B8A6).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF14B8A6).withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, color: Color(0xFF14B8A6), size: 18),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Stream URL will be:\nhttp://<IP>/stream',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 11,
-                        fontFamily: 'RobotoMono',
-                      ),
-                    ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Auto-scan button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: scanning
+                      ? null
+                      : () async {
+                          setDialogState(() => scanning = true);
+                          final ip = await _scanForCamera();
+                          setDialogState(() => scanning = false);
+                          if (ip != null) {
+                            _ipController.text = ip;
+                          } else {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Camera not found. Make sure it\'s on the same WiFi.'),
+                                  backgroundColor: Color(0xFF374151),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                  icon: scanning
+                      ? const SizedBox(
+                          width: 16, height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.wifi_find, size: 18),
+                  label: Text(scanning ? 'Scanning...' : 'AUTO SCAN FOR CAMERA'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF14B8A6),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '— or enter IP manually —',
+                style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 11),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _ipController,
+                style: const TextStyle(color: Colors.white, fontFamily: 'RobotoMono', fontSize: 14),
+                decoration: InputDecoration(
+                  labelText: 'Camera IP Address',
+                  labelStyle: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+                  hintText: '192.168.1.100',
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.2)),
+                  prefixIcon: Icon(Icons.wifi, color: Colors.white.withOpacity(0.4), size: 20),
+                  filled: true,
+                  fillColor: Colors.black.withOpacity(0.3),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFF14B8A6)),
+                  ),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
+            ),
+            TextButton(
+              onPressed: () async {
+                final ip = _ipController.text.trim();
+                if (ip.isNotEmpty) {
+                  await _saveCameraIp(ip);
+                  if (mounted) {
+                    Navigator.pop(context);
+                    _startStream();
+                  }
+                }
+              },
+              child: const Text(
+                'SAVE & CONNECT',
+                style: TextStyle(color: Color(0xFF14B8A6), fontWeight: FontWeight.bold),
               ),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
-          ),
-          TextButton(
-            onPressed: () async {
-              final ip = _ipController.text.trim();
-              if (ip.isNotEmpty) {
-                await _saveCameraIp(ip);
-                if (mounted) {
-                  Navigator.pop(context);
-                  _startStream();
-                }
-              }
-            },
-            child: const Text(
-              'SAVE & CONNECT',
-              style: TextStyle(color: Color(0xFF14B8A6), fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -50,7 +50,10 @@
 
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <WiFiUdp.h>
+#include <ESPmDNS.h>
 #include <WiFiManager.h>  // https://github.com/tzapu/WiFiManager
+#include <Preferences.h>  // ESP32 non-volatile storage
 #include "esp_http_server.h"
 
 // =============================================================================
@@ -66,6 +69,10 @@
 #define AP_NAME "OxyFeeder-CAM"           // Hotspot name for setup
 #define AP_PASSWORD "oxyfeeder123"        // Hotspot password (min 8 chars)
 #define CONFIG_TIMEOUT 180                // Seconds before config portal times out
+
+// Primary WiFi (phone hotspot) - tries this first before WiFiManager
+#define PRIMARY_SSID     "ZTE_5G_7aNbXv"
+#define PRIMARY_PASSWORD "Adminaly@1"
 
 // Stream settings
 #define STREAM_PORT 80                          // HTTP port for video stream
@@ -106,6 +113,9 @@
 // =============================================================================
 
 httpd_handle_t stream_httpd = NULL;
+Preferences prefs;
+WiFiUDP udpBroadcast;
+#define DISCOVERY_PORT 5556
 
 // MIME type boundary for MJPEG stream
 #define PART_BOUNDARY "123456789000000000000987654321"
@@ -222,36 +232,61 @@ void configModeCallback(WiFiManager *myWiFiManager) {
   }
 }
 
+// Try connecting to a specific SSID/password, returns true if connected within 10s
+bool tryConnect(const char* ssid, const char* password) {
+  if (strlen(ssid) == 0) return false;
+  Serial.printf("Trying WiFi: %s\n", ssid);
+  WiFi.begin(ssid, password);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  return WiFi.status() == WL_CONNECTED;
+}
+
 bool connectWiFi() {
   Serial.println();
   Serial.println("===========================================");
   Serial.println("OxyFeeder Camera Server - WiFi Setup");
   Serial.println("===========================================");
 
-  // Set callback for when entering config mode
-  wifiManager.setAPCallback(configModeCallback);
-
-  // Set config portal timeout (seconds)
-  wifiManager.setConfigPortalTimeout(CONFIG_TIMEOUT);
-
-  // Disable WiFi sleep for better streaming
   WiFi.setSleep(false);
 
-  // Custom parameters could be added here (like camera name, etc.)
-  // WiFiManagerParameter custom_text("<p>OxyFeeder Camera Setup</p>");
-  // wifiManager.addParameter(&custom_text);
+  // 1. Try user-saved credentials from Preferences (set via /wifi page)
+  prefs.begin("wifi", true);  // read-only
+  String savedSSID = prefs.getString("ssid", "");
+  String savedPass = prefs.getString("pass", "");
+  prefs.end();
 
-  Serial.println("Attempting to connect to saved WiFi...");
+  if (savedSSID.length() > 0) {
+    Serial.println("Found saved WiFi credentials.");
+    if (tryConnect(savedSSID.c_str(), savedPass.c_str())) {
+      goto connected;
+    }
+    Serial.println("Saved credentials failed.");
+  }
 
-  // autoConnect tries saved credentials first
-  // If fails, starts config portal with given AP name/password
+  // 2. Try hardcoded fallback hotspot
+  if (tryConnect(PRIMARY_SSID, PRIMARY_PASSWORD)) {
+    goto connected;
+  }
+  Serial.println("Primary WiFi failed. Falling back to WiFiManager...");
+  WiFi.disconnect(true);
+  delay(200);
+
+  // 3. Fall back to WiFiManager config portal
+  wifiManager.setAPCallback(configModeCallback);
+  wifiManager.setConfigPortalTimeout(CONFIG_TIMEOUT);
   if (!wifiManager.autoConnect(AP_NAME, AP_PASSWORD)) {
-    Serial.println("\nConfig portal timed out!");
-    Serial.println("No WiFi configured. Restarting...");
+    Serial.println("\nConfig portal timed out! Restarting...");
     delay(3000);
     ESP.restart();
     return false;
   }
+
+connected:
 
   Serial.println("\n");
   Serial.println("===========================================");
@@ -362,6 +397,7 @@ static esp_err_t index_handler(httpd_req_t *req) {
     "<img src='/stream' />"
     "<div class='info'>"
     "Stream URL: <code>/stream</code><br><br>"
+    "<a href='/wifi' class='btn' style='background:#00d9ff;color:#000;'>Change WiFi</a>"
     "<a href='/reset' class='btn' onclick=\"return confirm('Reset WiFi settings?');\">Reset WiFi</a>"
     "</div>"
     "</body>"
@@ -417,6 +453,119 @@ static esp_err_t reset_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+// Handler for GET /wifi — shows the WiFi config form
+static esp_err_t wifi_get_handler(httpd_req_t *req) {
+  prefs.begin("wifi", true);
+  String currentSSID = prefs.getString("ssid", "");
+  prefs.end();
+
+  char html[1200];
+  snprintf(html, sizeof(html),
+    "<!DOCTYPE html>"
+    "<html><head><title>Camera WiFi</title>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    "<style>"
+    "body{font-family:Arial;text-align:center;background:#1a1a2e;color:#eee;padding:30px;}"
+    "h1{color:#00d9ff;} .card{background:#16213e;padding:20px;border-radius:8px;margin:20px auto;max-width:360px;}"
+    "input{width:90%%;padding:10px;margin:8px 0;border-radius:5px;border:1px solid #00d9ff;background:#0f3460;color:#eee;font-size:16px;}"
+    ".btn{padding:12px 30px;background:#00d9ff;color:#000;border:none;border-radius:5px;font-size:16px;cursor:pointer;width:96%%;margin-top:8px;}"
+    ".note{font-size:12px;color:#aaa;margin-top:10px;}"
+    "</style></head><body>"
+    "<h1>Camera WiFi Setup</h1>"
+    "<div class='card'>"
+    "<p>Current: <strong>%s</strong></p>"
+    "<form method='POST' action='/wifi'>"
+    "<input name='ssid' placeholder='WiFi Name (SSID)' required><br>"
+    "<input name='pass' type='password' placeholder='Password'><br>"
+    "<input type='submit' class='btn' value='Save & Restart'>"
+    "</form>"
+    "<p class='note'>Camera will restart and connect to the new WiFi.<br>"
+    "If it fails, it will try TestWifi then start OxyFeeder-CAM hotspot.</p>"
+    "</div></body></html>",
+    currentSSID.length() > 0 ? currentSSID.c_str() : "None saved"
+  );
+
+  httpd_resp_set_type(req, "text/html");
+  return httpd_resp_send(req, html, strlen(html));
+}
+
+// Handler for POST /wifi — saves credentials and restarts
+static esp_err_t wifi_post_handler(httpd_req_t *req) {
+  char body[256] = {0};
+  int received = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (received <= 0) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  body[received] = '\0';
+
+  // Parse ssid= and pass= from URL-encoded body
+  char ssid[64] = {0};
+  char pass[64] = {0};
+
+  // Simple URL-decode helper inline
+  auto urlDecode = [](const char* src, char* dst, int maxLen) {
+    int i = 0, j = 0;
+    while (src[i] && j < maxLen - 1) {
+      if (src[i] == '%' && src[i+1] && src[i+2]) {
+        char hex[3] = {src[i+1], src[i+2], 0};
+        dst[j++] = (char)strtol(hex, nullptr, 16);
+        i += 3;
+      } else if (src[i] == '+') {
+        dst[j++] = ' ';
+        i++;
+      } else {
+        dst[j++] = src[i++];
+      }
+    }
+    dst[j] = '\0';
+  };
+
+  // Extract ssid value
+  char* ssidPtr = strstr(body, "ssid=");
+  if (ssidPtr) {
+    ssidPtr += 5;
+    char raw[64] = {0};
+    int k = 0;
+    while (ssidPtr[k] && ssidPtr[k] != '&' && k < 63) { raw[k] = ssidPtr[k]; k++; }
+    urlDecode(raw, ssid, sizeof(ssid));
+  }
+
+  // Extract pass value
+  char* passPtr = strstr(body, "pass=");
+  if (passPtr) {
+    passPtr += 5;
+    char raw[64] = {0};
+    int k = 0;
+    while (passPtr[k] && passPtr[k] != '&' && k < 63) { raw[k] = passPtr[k]; k++; }
+    urlDecode(raw, pass, sizeof(pass));
+  }
+
+  Serial.printf("WiFi config received — SSID: %s\n", ssid);
+
+  // Save to Preferences
+  prefs.begin("wifi", false);
+  prefs.putString("ssid", ssid);
+  prefs.putString("pass", pass);
+  prefs.end();
+
+  const char* html =
+    "<!DOCTYPE html><html><head><title>Saved</title>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    "<style>body{font-family:Arial;text-align:center;background:#1a1a2e;color:#eee;padding:50px;}"
+    "h1{color:#00d9ff;}.card{background:#16213e;padding:20px;border-radius:8px;}</style></head>"
+    "<body><h1>WiFi Saved!</h1>"
+    "<div class='card'><p>Restarting and connecting to new WiFi...</p>"
+    "<p>Check the IP in the app once it connects.</p></div></body></html>";
+
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_send(req, html, strlen(html));
+
+  delay(1500);
+  ESP.restart();
+  return ESP_OK;
+}
+
 // =============================================================================
 // WEB SERVER SETUP
 // =============================================================================
@@ -425,6 +574,7 @@ void startStreamServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = STREAM_PORT;
   config.ctrl_port = STREAM_PORT;
+  config.max_uri_handlers = 8;
 
   // Register URI handlers
   httpd_uri_t index_uri = {
@@ -448,16 +598,33 @@ void startStreamServer() {
     .user_ctx  = NULL
   };
 
+  httpd_uri_t wifi_get_uri = {
+    .uri       = "/wifi",
+    .method    = HTTP_GET,
+    .handler   = wifi_get_handler,
+    .user_ctx  = NULL
+  };
+
+  httpd_uri_t wifi_post_uri = {
+    .uri       = "/wifi",
+    .method    = HTTP_POST,
+    .handler   = wifi_post_handler,
+    .user_ctx  = NULL
+  };
+
   Serial.printf("Starting web server on port %d\n", config.server_port);
 
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(stream_httpd, &index_uri);
     httpd_register_uri_handler(stream_httpd, &stream_uri);
     httpd_register_uri_handler(stream_httpd, &reset_uri);
+    httpd_register_uri_handler(stream_httpd, &wifi_get_uri);
+    httpd_register_uri_handler(stream_httpd, &wifi_post_uri);
     Serial.println("Web server started successfully!");
     Serial.println("  /        - Camera page with stream");
     Serial.println("  /stream  - Raw MJPEG stream");
     Serial.println("  /reset   - Clear WiFi and reconfigure");
+    Serial.println("  /wifi    - Change WiFi credentials");
   } else {
     Serial.println("Error starting web server!");
   }
@@ -510,6 +677,15 @@ void setup() {
     }
   }
 
+  // Start UDP discovery broadcast
+  udpBroadcast.begin(DISCOVERY_PORT);
+
+  // Start mDNS — camera reachable at http://oxyfeeder-cam.local/stream
+  if (MDNS.begin("oxyfeeder-cam")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("mDNS started: http://oxyfeeder-cam.local/stream");
+  }
+
   // Start the streaming web server
   startStreamServer();
 
@@ -530,6 +706,35 @@ void setup() {
 void loop() {
   // The HTTP server runs in background tasks
   // Nothing needed in main loop for basic streaming
+
+  // Serial command handler
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd == "RESET_WIFI") {
+      Serial.println("Resetting WiFi credentials...");
+      wifiManager.resetSettings();
+      delay(1000);
+      ESP.restart();
+    } else if (cmd == "IP") {
+      Serial.print("Camera IP: http://");
+      Serial.print(WiFi.localIP());
+      Serial.println("/stream");
+    }
+  }
+
+  // Broadcast IP via UDP so app can auto-discover camera
+  static unsigned long lastBroadcastTime = 0;
+  if (millis() - lastBroadcastTime > 5000) {
+    lastBroadcastTime = millis();
+    IPAddress myIP = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP() : WiFi.softAPIP();
+    String msg = "OXYFEEDER_CAM:" + myIP.toString();
+    // Broadcast to subnet (works in both STA and AP mode)
+    IPAddress broadcast(myIP[0], myIP[1], myIP[2], 255);
+    udpBroadcast.beginPacket(broadcast, DISCOVERY_PORT);
+    udpBroadcast.print(msg);
+    udpBroadcast.endPacket();
+  }
 
   // Optional: Print status periodically
   static unsigned long lastStatusTime = 0;

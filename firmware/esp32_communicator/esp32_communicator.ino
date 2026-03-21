@@ -53,8 +53,11 @@ String receivedData = "";
 const int MAX_DATA_LENGTH = 200; // Maximum expected JSON string length
 
 // Command GPIO pins (direct wire to Arduino, active HIGH pulse)
-#define CMD_FEED_PIN 2   // GPIO2 = onboard LED, wire to Arduino Pin 17
-#define CMD_SMS_PIN 5    // GPIO5, wire to Arduino Pin 2
+#define CMD_FEED_PIN 12  // GPIO12, wire to Arduino Pin 17
+#define CMD_SMS_PIN 13   // GPIO13, wire to Arduino Pin 3
+
+// UART TX to Arduino (GPIO22 → Arduino Pin 19 RX1) for sending phone number
+#define ARDUINO_TX_PIN 22
 
 // ----------------------------------------------------------------------------
 // Schedule Management
@@ -337,6 +340,11 @@ class CommandCallbacks: public BLECharacteristicCallbacks {
           delay(500);
           digitalWrite(CMD_SMS_PIN, LOW);
           Serial.println("Pulsed SMS pin HIGH for 500ms");
+        } else if (rxValue.startsWith("PHONE:")) {
+          // Forward phone number to Arduino via Serial2 TX
+          Serial2.println(rxValue);
+          Serial.print("Forwarded to Arduino: ");
+          Serial.println(rxValue);
         } else if (rxValue.startsWith("SYNC_TIME") || rxValue.startsWith("SCHEDULE") || rxValue.startsWith("CLEAR_SCHEDULES") || rxValue.startsWith("THRESHOLD")) {
           processScheduleCommand(rxValue);
         } else {
@@ -356,8 +364,8 @@ void setup() {
   Serial.begin(115200);
   delay(500); // Short delay for serial to settle (no blocking wait)
 
-  // Serial2: RX only from Arduino
-  Serial2.begin(9600, SERIAL_8N1, 26, -1); // RX=26 (GPIO16/13/4 all failed on this module)
+  // Serial2: RX from Arduino (data), TX to Arduino (phone number commands)
+  Serial2.begin(9600, SERIAL_8N1, 26, ARDUINO_TX_PIN); // RX=GPIO26, TX=GPIO14
 
   // Command GPIO pins
   pinMode(CMD_FEED_PIN, OUTPUT);
@@ -489,11 +497,9 @@ void loop() {
   }
 
   if (deviceConnected && !oldDeviceConnected) {
-    // Client just connected - send a welcome message to confirm BLE works
+    // Client just connected - wait for real data from Arduino
     delay(1000); // Give client time to set up notifications
-    pCharacteristic->setValue("{\"do\": 0.1, \"feed\": 1, \"battery\": 1}");
-    pCharacteristic->notify();
-    Serial.println("Sent welcome data to new BLE client");
+    Serial.println("BLE client connected - waiting for real sensor data");
     oldDeviceConnected = deviceConnected;
   }
 

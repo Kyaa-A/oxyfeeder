@@ -106,7 +106,7 @@ const int DEFAULT_FEED_MIN_2 = 0;
 const int FEED_DURATION_SECONDS = 5;
 
 // Servo positions
-const int SERVO_OPEN_ANGLE = 90;
+const int SERVO_OPEN_ANGLE = 30;
 const int SERVO_CLOSED_ANGLE = 0;
 
 // Load cell calibration - ADJUST THIS after calibrating with known weight
@@ -121,12 +121,12 @@ const float DO_MAX_VALUE = 20.0;     // Max mg/L at max voltage
 
 // Safety thresholds
 const float DO_CRITICAL_THRESHOLD = 4.0;  // mg/L - trigger alarm below this
-const int LOW_FEED_THRESHOLD = 20;        // % - trigger warning below this
-const int LOW_BATTERY_THRESHOLD = 25;     // % - trigger warning below this
+const int LOW_FEED_THRESHOLD = 10;        // % - trigger warning below this
+const int LOW_BATTERY_THRESHOLD = 10;     // % - trigger warning below this
 
 // Voltage sensor calibration
 // 0-25V module with voltage divider ratio of 5:1
-const float VOLTAGE_RATIO = 5.0;
+const float VOLTAGE_RATIO = 4.57;  // Calibrated: actual/measured = 11.7/12.8
 const float BATTERY_FULL_VOLTAGE = 14.4;  // 12V battery fully charged
 const float BATTERY_EMPTY_VOLTAGE = 11.0; // 12V battery empty
 
@@ -177,12 +177,12 @@ bool lastFeedingDone = false;  // Prevents repeated feeding in same minute
 
 // SMS cooldown to prevent spam
 unsigned long lastSmsSent = 0;
-const unsigned long SMS_COOLDOWN = 300000;  // 5 minutes between SMS
+const unsigned long SMS_COOLDOWN = 10000;  // 10 seconds (testing mode)
 
 // SMS Phone Number (stored in EEPROM)
 #define EEPROM_PHONE_ADDR 0       // EEPROM starting address for phone number
 #define PHONE_NUMBER_LENGTH 15    // Max length of phone number
-char smsPhoneNumber[PHONE_NUMBER_LENGTH + 1] = "+639639192343";  // Default number
+char smsPhoneNumber[PHONE_NUMBER_LENGTH + 1] = "09550717546";  // Default number (local format)
 
 // Command buffer for receiving from ESP32
 String commandBuffer = "";
@@ -236,7 +236,7 @@ void setup() {
   Serial.begin(9600);       // USB Debug
   Serial1.begin(9600);      // ESP32 Data Output (TX1=Pin18 → ESP32 RX)
   pinMode(17, INPUT); // Feed command from ESP32 GPIO2 (external 10K pull-down installed)
-  pinMode(2, INPUT);  // SMS command from ESP32 GPIO5 (external 10K pull-down installed)
+  pinMode(3, INPUT);  // SMS command from ESP32 GPIO13 (external 10K pull-down installed)
   Serial3.begin(9600);      // GSM Module (SIM800L)
   
   while (!Serial) {
@@ -416,7 +416,7 @@ void initActuators() {
   pinMode(MOTOR_ENA, OUTPUT);
   digitalWrite(MOTOR_IN1, LOW);
   digitalWrite(MOTOR_IN2, LOW);
-  analogWrite(MOTOR_ENA, 0);
+  digitalWrite(MOTOR_ENA, LOW);  // Fully disable motor driver
   Serial.println(F("  - DC Motor (L298N): OK"));
   
   // Servo
@@ -593,25 +593,25 @@ void dispenseFeed(int seconds) {
   Serial.println(F(" seconds..."));
 
   // BLOCKING feeding sequence (servo needs uninterrupted PWM)
+  // Step 1: Open servo briefly (100ms) then close
   Serial.println(F("[FEEDING] Gate opening..."));
   feedGate.attach(SERVO_PIN);
   feedGate.write(SERVO_OPEN_ANGLE);
-  delay(1000);  // Wait for servo
+  delay(150);  // Open for 150ms only
+  feedGate.write(SERVO_CLOSED_ANGLE);
+  delay(500);  // Wait for servo to fully close
 
+  // Step 2: Spin DC motor for the set duration
   Serial.println(F("[FEEDING] Dispensing feed..."));
   digitalWrite(MOTOR_IN1, HIGH);
   digitalWrite(MOTOR_IN2, LOW);
   analogWrite(MOTOR_ENA, 255);
   delay((unsigned long)seconds * 1000UL);
 
-  // Stop motor
+  // Stop motor - fully disable
   digitalWrite(MOTOR_IN1, LOW);
   digitalWrite(MOTOR_IN2, LOW);
-  analogWrite(MOTOR_ENA, 0);
-
-  Serial.println(F("[FEEDING] Closing gate..."));
-  feedGate.write(SERVO_CLOSED_ANGLE);
-  delay(1000);  // Wait for servo
+  digitalWrite(MOTOR_ENA, LOW);
 
   Serial.println(F("[FEEDING] Complete!"));
   triggerAlarm();  // Beep to confirm
@@ -821,26 +821,101 @@ void sendSMS(const char* message) {
   Serial.print(F("[GSM] Message: "));
   Serial.println(message);
   
-  // Set SMS to text mode (just in case)
+  // Clear any leftover data in SIM800L buffer
+  while (Serial3.available()) Serial3.read();
+
+  // Check SIM PIN status
+  Serial3.println(F("AT+CPIN?"));
+  delay(1000);
+  String pinResponse = "";
+  while (Serial3.available()) {
+    char c = Serial3.read();
+    pinResponse += c;
+  }
+  Serial.print(F("[GSM] PIN status: "));
+  Serial.println(pinResponse);
+  if (pinResponse.indexOf("READY") == -1) {
+    Serial.println(F("[GSM] ERROR: SIM not ready (PIN locked or not inserted)"));
+    return;
+  }
+
+  // Check network registration
+  Serial3.println(F("AT+CREG?"));
+  delay(1000);
+  String regResponse = "";
+  while (Serial3.available()) {
+    char c = Serial3.read();
+    regResponse += c;
+  }
+  Serial.print(F("[GSM] Network registration: "));
+  Serial.println(regResponse);
+  // +CREG: 0,1 = registered home, +CREG: 0,5 = roaming
+  if (regResponse.indexOf(",1") == -1 && regResponse.indexOf(",5") == -1) {
+    Serial.println(F("[GSM] ERROR: Not registered to network"));
+    return;
+  }
+
+  // Set SMS to text mode
   Serial3.println(F("AT+CMGF=1"));
   delay(500);
-  
-  // Set recipient phone number (from configurable variable)
+  while (Serial3.available()) Serial3.read();  // flush response
+
+  // Set recipient phone number
   Serial3.print(F("AT+CMGS=\""));
   Serial3.print(smsPhoneNumber);
   Serial3.println(F("\""));
-  delay(500);
-  
-  // Send message
+
+  // Wait for '>' prompt from SIM800L
+  unsigned long promptStart = millis();
+  bool gotPrompt = false;
+  while (millis() - promptStart < 5000) {
+    if (Serial3.available()) {
+      char c = Serial3.read();
+      Serial.write(c);  // print raw response to USB for debugging
+      if (c == '>') {
+        gotPrompt = true;
+        break;
+      }
+    }
+  }
+
+  if (!gotPrompt) {
+    Serial.println(F("[GSM] ERROR: No '>' prompt from SIM800L"));
+    return;
+  }
+
+  // Send message text
   Serial3.print(message);
   delay(100);
-  
-  // Send Ctrl+Z to send the message
-  Serial3.write(26);
-  delay(3000);
-  
-  lastSmsSent = now;
-  Serial.println(F("[GSM] SMS sent!"));
+  Serial3.write(26);  // Ctrl+Z to send
+
+  // Wait for +CMGS: response (up to 10 seconds)
+  unsigned long sendStart = millis();
+  String response = "";
+  bool smsSent = false;
+  while (millis() - sendStart < 10000) {
+    if (Serial3.available()) {
+      char c = Serial3.read();
+      Serial.write(c);  // print raw response
+      response += c;
+      if (response.indexOf("+CMGS:") >= 0) {
+        smsSent = true;
+        break;
+      }
+      if (response.indexOf("ERROR") >= 0) {
+        break;
+      }
+    }
+  }
+
+  if (smsSent) {
+    lastSmsSent = now;
+    Serial.println(F("[GSM] SMS sent!"));
+  } else {
+    Serial.println(F("[GSM] SMS FAILED! Check SIM/signal."));
+    Serial.print(F("[GSM] Response: "));
+    Serial.println(response);
+  }
 }
 
 // ============================================================================
@@ -982,11 +1057,11 @@ void processIncomingCommands() {
   if (feedPin == HIGH && feedReady) {
     feedReady = false;  // Lock until pin returns to LOW
     Serial.println(F("[COMMAND] Feed trigger from ESP32!"));
-    dispenseFeed(5);
+    dispenseFeed(2);
   }
 
   // SMS command: ESP32 GPIO5 → Arduino Pin 2 (active HIGH pulse, 1K pull-down)
-  bool smsPin = digitalRead(2);
+  bool smsPin = digitalRead(3);
   if (smsPin == LOW) {
     smsReady = true;  // Pin is idle (pulled down), ready for next trigger
   }
@@ -994,6 +1069,25 @@ void processIncomingCommands() {
     smsReady = false;  // Lock until pin returns to LOW
     Serial.println(F("[COMMAND] SMS alert trigger from ESP32!"));
     sendSMS("ALERT: OxyFeeder - Safety threshold crossed! Check your system immediately.");
+  }
+
+  // --- Commands from ESP32 via Serial1 RX (Pin 19) ---
+  static String serial1Buffer = "";
+  while (Serial1.available()) {
+    char c = Serial1.read();
+    if (c == '\n' || c == '\r') {
+      if (serial1Buffer.length() > 0) {
+        serial1Buffer.trim();
+        if (serial1Buffer.startsWith("PHONE:")) {
+          Serial.print(F("[ESP32] Phone command: "));
+          Serial.println(serial1Buffer);
+          handleCommand(serial1Buffer);
+        }
+        serial1Buffer = "";
+      }
+    } else {
+      if (serial1Buffer.length() < MAX_COMMAND_LENGTH) serial1Buffer += c;
+    }
   }
 
   // --- USB Serial commands (for testing via Serial Monitor) ---
@@ -1013,7 +1107,7 @@ void processIncomingCommands() {
         commandBuffer += c;
       }
     }
-  }
+    }
 }
 
 void handleCommand(String command) {
@@ -1047,6 +1141,24 @@ void handleCommand(String command) {
     } else {
       Serial.println(F("[CMD] Invalid phone number"));
       Serial1.println(F("{\"cmd\":\"PHONE\",\"status\":\"ERROR\"}"));
+    }
+  }
+  else if (cmdType == "TIME") {
+    // Set RTC time - format: TIME:HH:MM:SS
+    // Example: TIME:14:30:00
+    if (rtcAvailable && cmdValue.length() >= 8) {
+      int h = cmdValue.substring(0, 2).toInt();
+      int m = cmdValue.substring(3, 5).toInt();
+      int s = cmdValue.substring(6, 8).toInt();
+      DateTime now = rtc.now();
+      rtc.adjust(DateTime(now.year(), now.month(), now.day(), h, m, s));
+      Serial.print(F("[CMD] RTC time set to: "));
+      Serial.print(h); Serial.print(F(":"));
+      if (m < 10) Serial.print(F("0")); Serial.print(m);
+      Serial.print(F(":"));
+      if (s < 10) Serial.print(F("0")); Serial.println(s);
+    } else {
+      Serial.println(F("[CMD] Invalid time format. Use TIME:HH:MM:SS"));
     }
   }
   else if (cmdType == "FEED") {
