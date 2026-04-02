@@ -37,6 +37,7 @@
 #include <SPI.h>
 #include <Servo.h>
 #include <RTClib.h>
+// #include <HX711.h>  // LOAD CELL - uncomment if switching back to load cell
 
 #include <Arduino_GFX_Library.h>
 #include <EEPROM.h>
@@ -65,8 +66,13 @@
 // Sensors (UPDATED after bench testing - Feb 2026)
 #define DO_SENSOR_PIN       A1    // Dissolved Oxygen (Analog)
 #define VOLTAGE_SENSOR_PIN  A2    // Battery Voltage (A0 DAMAGED - moved to A2)
+// ULTRASONIC (current)
 #define ULTRASONIC_TRIG_PIN 13    // HC-SR04 Trigger
 #define ULTRASONIC_ECHO_PIN 48    // HC-SR04 Echo
+
+// LOAD CELL (commented out - uncomment if switching back)
+// #define HX711_DT_PIN        10    // Load Cell Data (Pin 8 DAMAGED - moved to 10)
+// #define HX711_SCK_PIN       11    // Load Cell Clock (Pin 9 DAMAGED - moved to 11)
 
 // Actuators
 #define MOTOR_IN1           4     // L298N Input 1
@@ -109,9 +115,14 @@ const int FEED_DURATION_SECONDS = 5;
 const int SERVO_OPEN_ANGLE = 30;
 const int SERVO_CLOSED_ANGLE = 0;
 
-// Ultrasonic feed level calibration - ADJUST THESE to match your hopper
+// ULTRASONIC calibration - ADJUST THESE to match your hopper
 const int HOPPER_EMPTY_CM = 30;  // Distance (cm) when hopper is empty
 const int HOPPER_FULL_CM  = 5;   // Distance (cm) when hopper is full
+
+// LOAD CELL calibration (commented out - uncomment if switching back)
+// float calibration_factor = -7050.0;
+// const float EMPTY_HOPPER_KG = 0.0;
+// const float FULL_HOPPER_KG = 5.0;
 
 // Dissolved Oxygen calibration
 // DFRobot DO sensor: V = 0-3V corresponds to 0-20 mg/L
@@ -140,6 +151,7 @@ const unsigned long HEARTBEAT_INTERVAL = 10000;      // 10 seconds - ALIVE indic
 // ============================================================================
 
 RTC_DS3231 rtc;
+// HX711 scale;  // LOAD CELL - uncomment if switching back
 Servo feedGate;
 
 // TFT Display - ST7796S 4.0" 480x320
@@ -542,6 +554,7 @@ int readBatteryPercent() {
   return percent;
 }
 
+// ---- ULTRASONIC (current) ----
 long readUltrasonicCM() {
   // Send 10us pulse to TRIG
   digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
@@ -568,6 +581,23 @@ int readFeedLevel() {
   int percent = map(distanceCM, HOPPER_EMPTY_CM, HOPPER_FULL_CM, 0, 100);
   return constrain(percent, 0, 100);
 }
+
+// ---- LOAD CELL (commented out - uncomment if switching back) ----
+// float readWeight() {
+//   if (!scaleAvailable) return 0.0;
+//   if (scale.is_ready()) {
+//     float weight = scale.get_units(5);
+//     if (weight < 0) weight = 0;
+//     return weight;
+//   }
+//   return 0.0;
+// }
+//
+// int readFeedLevel() {  // LOAD CELL version
+//   float weight = currentWeight;
+//   int percent = map(weight * 100, EMPTY_HOPPER_KG * 100, FULL_HOPPER_KG * 100, 0, 100);
+//   return constrain(percent, 0, 100);
+// }
 
 // ============================================================================
 // ACTUATOR CONTROL FUNCTIONS
