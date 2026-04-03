@@ -288,12 +288,21 @@ bool connectWiFi() {
 
 connected:
 
+  // Start mDNS — camera always reachable at http://oxyfeeder-cam.local/stream
+  if (MDNS.begin("oxyfeeder-cam")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("mDNS started: http://oxyfeeder-cam.local/stream");
+  } else {
+    Serial.println("mDNS failed - use IP address instead");
+  }
+
   Serial.println("\n");
   Serial.println("===========================================");
   Serial.println("       WiFi Connected Successfully!        ");
   Serial.println("===========================================");
   Serial.println();
-  Serial.println("Camera Stream URL:");
+  Serial.println("Camera Stream URLs:");
+  Serial.println("  http://oxyfeeder-cam.local/stream  (hostname - works anywhere)");
   Serial.println();
   Serial.print("   http://");
   Serial.print(WiFi.localIP());
