@@ -435,6 +435,7 @@ void initActuators() {
   // Servo
   feedGate.attach(SERVO_PIN);
   closeGate();  // Start with gate closed
+  feedGate.detach();  // Detach immediately — prevents HX711 jitter during idle
   Serial.println(F("  - Servo Gate: OK (Closed)"));
   
   // Buzzer
@@ -617,6 +618,7 @@ void dispenseFeed(int seconds) {
   delay(150);  // Open for 150ms only
   feedGate.write(SERVO_CLOSED_ANGLE);
   delay(500);  // Wait for servo to fully close
+  feedGate.detach();  // Detach so HX711 interrupt reads don't cause jitter
 
   // Step 2: Spin DC motor for the set duration
   Serial.println(F("[FEEDING] Dispensing feed..."));
