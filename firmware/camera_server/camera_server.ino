@@ -57,22 +57,27 @@
 #include "esp_http_server.h"
 
 // =============================================================================
-// WIFI CONFIGURATION - Via WiFiManager (no hardcoding needed!)
+// WIFI CONFIGURATION - Dynamic, no hardcoding!
 // =============================================================================
-// On first boot (or if WiFi fails), ESP32-CAM creates a hotspot:
-//   SSID: "OxyFeeder-CAM"
-//   Password: "oxyfeeder123"
-// Connect to it, a config page will open automatically.
-// Enter your WiFi credentials there - they will be saved permanently.
+// Works like a phone — connects to any WiFi, remembers it, switches anytime.
+//
+// First time / new location:
+//   1. Camera creates hotspot: "OxyFeeder-CAM" (pass: oxyfeeder123)
+//   2. Connect phone to OxyFeeder-CAM
+//   3. Open browser → 192.168.4.1 → select WiFi → enter password → done
+//   4. Camera saves and connects. Next boot = auto connects.
+//
+// Change WiFi later (without hotspot):
+//   - While connected: open browser → http://oxyfeeder-cam.local/wifi
+//   - Enter new WiFi name + password → camera restarts on new network
+//
+// Camera always reachable at: http://oxyfeeder-cam.local/stream
+// (no need to know the IP — hostname never changes)
 // =============================================================================
 
 #define AP_NAME "OxyFeeder-CAM"           // Hotspot name for setup
 #define AP_PASSWORD "oxyfeeder123"        // Hotspot password (min 8 chars)
 #define CONFIG_TIMEOUT 180                // Seconds before config portal times out
-
-// Primary WiFi (phone hotspot) - tries this first before WiFiManager
-#define PRIMARY_SSID     "ZTE_5G_7aNbXv"
-#define PRIMARY_PASSWORD "Adminaly@1"
 
 // Stream settings
 #define STREAM_PORT 80                          // HTTP port for video stream
@@ -260,23 +265,9 @@ bool connectWiFi() {
   String savedPass = prefs.getString("pass", "");
   prefs.end();
 
-  if (savedSSID.length() > 0) {
-    Serial.println("Found saved WiFi credentials.");
-    if (tryConnect(savedSSID.c_str(), savedPass.c_str())) {
-      goto connected;
-    }
-    Serial.println("Saved credentials failed.");
-  }
-
-  // 2. Try hardcoded fallback hotspot
-  if (tryConnect(PRIMARY_SSID, PRIMARY_PASSWORD)) {
-    goto connected;
-  }
-  Serial.println("Primary WiFi failed. Falling back to WiFiManager...");
-  WiFi.disconnect(true);
-  delay(200);
-
-  // 3. Fall back to WiFiManager config portal
+  // WiFiManager handles everything — tries saved credentials first,
+  // then opens OxyFeeder-CAM hotspot for reconfiguration if needed
+  // Fall back to WiFiManager config portal
   wifiManager.setAPCallback(configModeCallback);
   wifiManager.setConfigPortalTimeout(CONFIG_TIMEOUT);
   if (!wifiManager.autoConnect(AP_NAME, AP_PASSWORD)) {
