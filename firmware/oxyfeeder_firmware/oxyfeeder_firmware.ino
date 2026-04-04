@@ -37,7 +37,7 @@
 #include <SPI.h>
 #include <Servo.h>
 #include <RTClib.h>
-#include <HX711.h>
+// #include <HX711.h>  // LOAD CELL - uncomment if switching back
 
 #include <Arduino_GFX_Library.h>
 #include <EEPROM.h>
@@ -66,12 +66,11 @@
 // Sensors (UPDATED after bench testing - Feb 2026)
 #define DO_SENSOR_PIN       A1    // Dissolved Oxygen (Analog)
 #define VOLTAGE_SENSOR_PIN  A2    // Battery Voltage (A0 DAMAGED - moved to A2)
-#define HX711_DT_PIN        10    // Load Cell Data (Pin 8 DAMAGED - moved to 10)
-#define HX711_SCK_PIN       11    // Load Cell Clock (Pin 9 DAMAGED - moved to 11)
+// #define HX711_DT_PIN        10    // LOAD CELL - uncomment if switching back
+// #define HX711_SCK_PIN       11    // LOAD CELL - uncomment if switching back
 
-// ULTRASONIC (commented out - uncomment if switching back)
-// #define ULTRASONIC_TRIG_PIN 13
-// #define ULTRASONIC_ECHO_PIN 48
+#define ULTRASONIC_TRIG_PIN 13    // HC-SR04 Trigger
+#define ULTRASONIC_ECHO_PIN 48    // HC-SR04 Echo
 
 // Actuators
 #define MOTOR_IN1           4     // L298N Input 1
@@ -114,14 +113,14 @@ const int FEED_DURATION_SECONDS = 5;
 const int SERVO_OPEN_ANGLE = 30;
 const int SERVO_CLOSED_ANGLE = 0;
 
-// Load cell calibration - ADJUST THIS after calibrating with known weight
-float calibration_factor = -7050.0;  // Start with this, adjust as needed
-const float EMPTY_HOPPER_KG = 0.0;   // Weight when hopper is empty
-const float FULL_HOPPER_KG = 5.0;    // Weight when hopper is full (in kg)
+// ULTRASONIC calibration - ADJUST THESE to match your hopper
+const int HOPPER_EMPTY_CM = 30;  // Distance (cm) when hopper is empty
+const int HOPPER_FULL_CM  = 5;   // Distance (cm) when hopper is full
 
-// ULTRASONIC calibration (commented out - uncomment if switching back)
-// const int HOPPER_EMPTY_CM = 30;
-// const int HOPPER_FULL_CM  = 5;
+// LOAD CELL calibration (commented out - uncomment if switching back)
+// float calibration_factor = -7050.0;
+// const float EMPTY_HOPPER_KG = 0.0;
+// const float FULL_HOPPER_KG = 5.0;
 
 // Dissolved Oxygen calibration
 // DFRobot DO sensor: V = 0-3V corresponds to 0-20 mg/L
@@ -150,7 +149,7 @@ const unsigned long HEARTBEAT_INTERVAL = 10000;      // 10 seconds - ALIVE indic
 // ============================================================================
 
 RTC_DS3231 rtc;
-HX711 scale;
+// HX711 scale;  // LOAD CELL - uncomment if switching back
 Servo feedGate;
 
 // TFT Display - ST7796S 4.0" 480x320
@@ -168,11 +167,9 @@ float currentDissolvedOxygen = 0.0;   // mg/L
 int currentFeedLevel = 0;              // percentage 0-100
 int currentBatteryPercent = 0;         // percentage 0-100
 float currentBatteryVoltage = 0.0;     // volts
-float currentWeight = 0.0;             // kg
 
 DateTime currentTime;
 bool rtcAvailable = false;
-bool scaleAvailable = false;
 
 // Timing variables
 unsigned long lastSensorRead = 0;
@@ -212,7 +209,7 @@ void initGSM();
 float readDissolvedOxygen();
 float readBatteryVoltage();
 int readBatteryPercent();
-float readWeight();
+long readUltrasonicCM();
 int readFeedLevel();
 
 void dispenseFeed(int seconds);
@@ -274,7 +271,6 @@ void setup() {
   currentDissolvedOxygen = readDissolvedOxygen();
   currentBatteryVoltage = readBatteryVoltage();
   currentBatteryPercent = readBatteryPercent();
-  currentWeight = readWeight();
   currentFeedLevel = readFeedLevel();
   
   Serial.println(F(""));
@@ -304,8 +300,7 @@ void loop() {
     currentBatteryVoltage = readBatteryVoltage();
     currentBatteryPercent = readBatteryPercent();
     currentWeight = readWeight();
-    currentWeight = readWeight();
-  currentFeedLevel = readFeedLevel();
+    currentFeedLevel = readFeedLevel();
     
     // Debug output
     Serial.print(F("DO: "));
@@ -390,30 +385,25 @@ void initSensors() {
     Serial.println(F("FAILED! Check wiring."));
   }
   
-  // Initialize Load Cell (HX711)
-  Serial.print(F("  - Load Cell HX711: "));
-  scale.begin(HX711_DT_PIN, HX711_SCK_PIN);
-  scaleAvailable = false;
-  for (int i = 0; i < 10; i++) {
-    delay(100);
-    if (scale.is_ready()) {
-      scaleAvailable = true;
-      scale.set_scale(calibration_factor);
-      scale.tare();
-      Serial.print(F("OK - Tared (attempt "));
-      Serial.print(i + 1);
-      Serial.println(F(")"));
-      break;
-    }
-  }
-  if (!scaleAvailable) {
-    Serial.println(F("FAILED after 10 attempts! Check DT=10, SCK=11"));
+  // Initialize Ultrasonic Sensor (HC-SR04)
+  Serial.print(F("  - Ultrasonic HC-SR04: "));
+  pinMode(ULTRASONIC_TRIG_PIN, OUTPUT);
+  pinMode(ULTRASONIC_ECHO_PIN, INPUT);
+  digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
+  delay(50);
+  long testDist = readUltrasonicCM();
+  if (testDist > 0 && testDist < 400) {
+    Serial.print(F("OK - Distance: "));
+    Serial.print(testDist);
+    Serial.println(F(" cm"));
+  } else {
+    Serial.println(F("WARNING - Check TRIG=13, ECHO=48"));
   }
 
-  // ULTRASONIC init (commented out - uncomment if switching back)
-  // pinMode(ULTRASONIC_TRIG_PIN, OUTPUT);
-  // pinMode(ULTRASONIC_ECHO_PIN, INPUT);
-  // digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
+  // LOAD CELL init (commented out - uncomment if switching back)
+  // scale.begin(HX711_DT_PIN, HX711_SCK_PIN);
+  // scale.set_scale(calibration_factor);
+  // scale.tare();
   
   // Analog pins (no special init needed)
   Serial.println(F("  - DO Sensor (A1): OK"));
@@ -558,39 +548,39 @@ int readBatteryPercent() {
   return percent;
 }
 
-// ---- LOAD CELL (current) ----
-float readWeight() {
-  if (!scaleAvailable) return 0.0;
-  if (scale.is_ready()) {
-    float weight = scale.get_units(5);
-    if (weight < 0) weight = 0;
-    return weight;
-  }
-  return 0.0;
+// ---- ULTRASONIC (current) ----
+long readUltrasonicCM() {
+  digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(ULTRASONIC_TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
+  long duration = pulseIn(ULTRASONIC_ECHO_PIN, HIGH, 30000);
+  if (duration == 0) return -1;
+  return duration / 58;
 }
 
 int readFeedLevel() {
-  float weight = currentWeight;
-  int percent = map(weight * 100, EMPTY_HOPPER_KG * 100, FULL_HOPPER_KG * 100, 0, 100);
+  long distanceCM = readUltrasonicCM();
+  if (distanceCM <= 0) return currentFeedLevel;  // Keep last reading on error
+  int percent = map(distanceCM, HOPPER_EMPTY_CM, HOPPER_FULL_CM, 0, 100);
   return constrain(percent, 0, 100);
 }
 
-// ---- ULTRASONIC (commented out - uncomment if switching back) ----
-// long readUltrasonicCM() {
-//   digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
-//   delayMicroseconds(2);
-//   digitalWrite(ULTRASONIC_TRIG_PIN, HIGH);
-//   delayMicroseconds(10);
-//   digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
-//   long duration = pulseIn(ULTRASONIC_ECHO_PIN, HIGH, 30000);
-//   if (duration == 0) return -1;
-//   return duration / 58;
+// ---- LOAD CELL (commented out - uncomment if switching back) ----
+// float readWeight() {
+//   if (!scaleAvailable) return 0.0;
+//   if (scale.is_ready()) {
+//     float weight = scale.get_units(5);
+//     if (weight < 0) weight = 0;
+//     return weight;
+//   }
+//   return 0.0;
 // }
 //
-// int readFeedLevel() {  // ULTRASONIC version
-//   long distanceCM = readUltrasonicCM();
-//   if (distanceCM <= 0) return currentFeedLevel;
-//   int percent = map(distanceCM, HOPPER_EMPTY_CM, HOPPER_FULL_CM, 0, 100);
+// int readFeedLevel() {  // LOAD CELL version
+//   float weight = currentWeight;
+//   int percent = map(weight * 100, EMPTY_HOPPER_KG * 100, FULL_HOPPER_KG * 100, 0, 100);
 //   return constrain(percent, 0, 100);
 // }
 
