@@ -114,7 +114,7 @@ const int SERVO_OPEN_ANGLE = 30;
 const int SERVO_CLOSED_ANGLE = 0;
 
 // ULTRASONIC calibration - ADJUST THESE to match your hopper
-const int HOPPER_EMPTY_CM = 30;  // Distance (cm) when hopper is empty
+const int HOPPER_EMPTY_CM = 37;  // Distance (cm) when hopper is empty (actual reading)
 const int HOPPER_FULL_CM  = 5;   // Distance (cm) when hopper is full
 
 // LOAD CELL calibration (commented out - uncomment if switching back)
@@ -299,7 +299,6 @@ void loop() {
     currentDissolvedOxygen = readDissolvedOxygen();
     currentBatteryVoltage = readBatteryVoltage();
     currentBatteryPercent = readBatteryPercent();
-    currentWeight = readWeight();
     currentFeedLevel = readFeedLevel();
     
     // Debug output
@@ -307,7 +306,9 @@ void loop() {
     Serial.print(currentDissolvedOxygen, 1);
     Serial.print(F(" mg/L | Feed: "));
     Serial.print(currentFeedLevel);
-    Serial.print(F("% | Battery: "));
+    Serial.print(F("% ("));
+    Serial.print(readUltrasonicCM());
+    Serial.print(F("cm) | Battery: "));
     Serial.print(currentBatteryPercent);
     Serial.print(F("% ("));
     Serial.print(currentBatteryVoltage, 1);
@@ -561,7 +562,25 @@ long readUltrasonicCM() {
 }
 
 int readFeedLevel() {
-  long distanceCM = readUltrasonicCM();
+  // Take 3 readings and use median to filter bad spikes
+  long readings[3];
+  for (int i = 0; i < 3; i++) {
+    readings[i] = readUltrasonicCM();
+    delay(10);
+  }
+
+  // Simple sort to find median
+  for (int i = 0; i < 2; i++) {
+    for (int j = i + 1; j < 3; j++) {
+      if (readings[i] > readings[j]) {
+        long temp = readings[i];
+        readings[i] = readings[j];
+        readings[j] = temp;
+      }
+    }
+  }
+
+  long distanceCM = readings[1];  // Median value
   if (distanceCM <= 0) return currentFeedLevel;  // Keep last reading on error
   int percent = map(distanceCM, HOPPER_EMPTY_CM, HOPPER_FULL_CM, 0, 100);
   return constrain(percent, 0, 100);
