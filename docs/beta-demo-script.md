@@ -1,7 +1,7 @@
 # OxyFeeder — Beta Video Demo Script
 
 **Format:** Step-by-step input-process-output for each function
-**Total Length:** ~5-7 minutes
+**Total Length:** ~4-5 minutes
 **Style:** Technical walkthrough, concise narration
 
 Each function is one scene. Record separately, edit together.
@@ -74,15 +74,15 @@ Each function is one scene. Record separately, edit together.
 
 | | |
 |---|---|
-| **Input** | HC-SR04 ultrasonic sensor at top of hopper |
-| **Process** | Sends ultrasonic pulse, measures echo time, calculates distance, maps to percentage |
+| **Input** | HC-SR04 ultrasonic sensor mounted on the side of the hopper |
+| **Process** | Sends ultrasonic pulse, measures echo time, calculates distance to feed surface, maps to percentage |
 | **Output** | Feed level displayed in app as percentage |
 
 ### Script
-> "An ultrasonic sensor mounted at the top of the hopper measures distance to the feed surface. This distance is converted to a percentage and displayed in the app."
+> "An ultrasonic sensor mounted on the side of the hopper measures distance to the feed surface. This distance is converted to a percentage and displayed in the app."
 
 ### Shot
-- Top of hopper showing ultrasonic sensor
+- Side of hopper showing ultrasonic sensor
 - App showing Feed Level card
 
 ---
@@ -146,58 +146,39 @@ Each function is one scene. Record separately, edit together.
 
 ---
 
-## SCENE 8 — Safety Threshold (Low Feed Alert)
+## SCENE 8 — Automatic SMS Alert (Low Feed)
 
-**Function:** Auto-alert when feed runs low
-
-| | |
-|---|---|
-| **Input** | User sets Low Feed threshold via slider in app |
-| **Process** | Threshold synced to Arduino. Arduino compares current feed level every cycle. If below threshold → triggers buzzer + sends SMS. |
-| **Output** | Red banner in app, SMS to user phone, buzzer sounds |
-
-### Script
-> "The user sets the low feed threshold using a slider. When feed drops below this value, the app shows a red alert banner, the SIM800L sends an SMS, and the buzzer sounds."
-
-### Shot
-- Slider adjustment in app
-- Red alert banner appearing
-- Buzzer sounding
-
----
-
-## SCENE 9 — SMS Alert (Test SMS)
-
-**Function:** Send SMS from machine to user phone
+**Function:** Auto-send SMS when feed level drops below threshold
 
 | | |
 |---|---|
-| **Input** | User taps "TEST SMS" in app |
-| **Process** | App sends command via BLE → ESP32 → GPIO pulse → Arduino. Arduino issues AT commands to SIM800L. SIM800L sends SMS over cellular network. |
-| **Output** | SMS arrives on user's phone |
+| **Input** | Feed level drops below 10% (detected by ultrasonic sensor) |
+| **Process** | Arduino detects low feed condition. SIM800L sends SMS to registered phone number. 1-hour cooldown applied to prevent spam. |
+| **Output** | SMS arrives on user's phone with low feed warning |
 
 ### Script
-> "Tapping TEST SMS triggers the SIM800L module inside the machine to send a message using its own SIM card. The user receives an SMS independent of Bluetooth or internet."
+> "When the feed level drops below 10 percent, the system automatically sends an SMS alert to the user's registered phone number. A 1-hour cooldown is applied between alerts to prevent message spam."
 
 ### Shot
-- Tap TEST SMS
-- Time-skip 10-30 seconds
-- SMS notification on phone screen
+- Show feed level dropping (or empty hopper)
+- Time-skip
+- SMS notification appearing on phone screen
+- Show SMS content: "OxyFeeder ALERT: Low feed level! Please refill the hopper."
 
 ---
 
-## SCENE 10 — Live Camera Stream
+## SCENE 9 — Live Camera Stream
 
 **Function:** Stream live video from pond
 
 | | |
 |---|---|
 | **Input** | User opens "Live Camera" in app |
-| **Process** | App scans WiFi network for ESP32-CAM. Establishes HTTP stream connection. |
+| **Process** | ESP32-CAM connects to saved WiFi network. If no WiFi available, the camera creates its own access point. App auto-discovers the camera and connects to the stream. |
 | **Output** | Live video displayed in app |
 
 ### Script
-> "The ESP32-CAM module connects to WiFi and broadcasts a video stream. The app auto-discovers the camera on the local network and displays the live feed."
+> "The ESP32-CAM module connects to the saved WiFi network. If no WiFi is available, the camera automatically creates its own access point so the user can still connect. The app discovers the camera and displays the live feed."
 
 ### Shot
 - Tap Live Camera
@@ -206,26 +187,7 @@ Each function is one scene. Record separately, edit together.
 
 ---
 
-## SCENE 11 — Three-Layer Alert System
-
-**Function:** Notify user through multiple channels
-
-| | |
-|---|---|
-| **Input** | Any safety threshold crossed |
-| **Process** | Triggers all 3 alert layers simultaneously |
-| **Output** | (1) Red banner in app, (2) SMS to phone, (3) Buzzer on machine |
-
-### Script
-> "Alerts work on three independent layers. The app shows a red banner when connected. The SIM800L sends SMS anywhere with cellular signal. The buzzer sounds at the machine itself. Even if one layer fails, the others still notify the user."
-
-### Shot
-- Quick cuts: app banner, SMS arriving, buzzer sounding
-- Optional: split-screen showing all three at once
-
----
-
-## SCENE 12 — Diagnostic View (Sensors Tab)
+## SCENE 10 — Diagnostic View (Sensors Tab)
 
 **Function:** Check status of each component
 
@@ -244,12 +206,12 @@ Each function is one scene. Record separately, edit together.
 
 ---
 
-## SCENE 13 — Closing
+## SCENE 11 — Closing
 
 **Function:** Summary
 
 ### Script
-> "OxyFeeder combines automated feeding, real-time monitoring, three-layer alerts, and live camera in one solar-powered system. Designed for small to medium fishponds. Currently in beta testing."
+> "OxyFeeder combines automated feeding, real-time monitoring, automatic SMS alerts, and live camera in one solar-powered system. Designed for small to medium fishponds. Currently in beta testing."
 
 ### Shot
 - Hero shot of machine
@@ -268,13 +230,11 @@ Each function is one scene. Record separately, edit together.
 | 5 | Read Battery | 10s |
 | 6 | Manual Feeding | 20s |
 | 7 | Scheduled Feeding | 25s |
-| 8 | Threshold Alert | 20s |
-| 9 | SMS Alert | 25s |
-| 10 | Live Camera | 20s |
-| 11 | 3-Layer Alerts | 15s |
-| 12 | Sensors Diagnostic | 15s |
-| 13 | Closing | 20s |
-| | **TOTAL** | **~4-5 min** |
+| 8 | Auto SMS Alert | 25s |
+| 9 | Live Camera | 20s |
+| 10 | Sensors Diagnostic | 15s |
+| 11 | Closing | 20s |
+| | **TOTAL** | **~3-4 min** |
 
 ---
 
@@ -284,7 +244,7 @@ Each function is one scene. Record separately, edit together.
 - [ ] SIM card has load
 - [ ] Phone number set in app
 - [ ] At least one schedule set
-- [ ] WiFi available
+- [ ] WiFi available (or test the AP fallback)
 - [ ] Test every function once before recording
 - [ ] Phone fully charged
 - [ ] Quiet location for voice-over
