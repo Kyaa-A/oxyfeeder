@@ -34,23 +34,23 @@
 // ----------------------------------------------------------------------------
 
 // Define unique UUIDs for our OxyFeeder BLE service
-#define SERVICE_UUID            "0000abcd-0000-1000-8000-00805f9b34fb"
-#define CHARACTERISTIC_UUID     "0000abce-0000-1000-8000-00805f9b34fb"  // For sending data to app
-#define COMMAND_CHAR_UUID       "0000abcf-0000-1000-8000-00805f9b34fb"  // For receiving commands from app
+#define SERVICE_UUID "0000abcd-0000-1000-8000-00805f9b34fb"
+#define CHARACTERISTIC_UUID "0000abce-0000-1000-8000-00805f9b34fb"  // For sending data to app
+#define COMMAND_CHAR_UUID "0000abcf-0000-1000-8000-00805f9b34fb"    // For receiving commands from app
 
 // ----------------------------------------------------------------------------
 // 3) Global Variables
 // ----------------------------------------------------------------------------
 
-BLEServer* pServer = NULL;
-BLECharacteristic* pCharacteristic = NULL;      // Data to app (notify)
-BLECharacteristic* pCommandCharacteristic = NULL; // Commands from app (write)
+BLEServer *pServer = NULL;
+BLECharacteristic *pCharacteristic = NULL;         // Data to app (notify)
+BLECharacteristic *pCommandCharacteristic = NULL;  // Commands from app (write)
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
 // Buffer for receiving JSON data from Arduino
 String receivedData = "";
-const int MAX_DATA_LENGTH = 200; // Maximum expected JSON string length
+const int MAX_DATA_LENGTH = 200;  // Maximum expected JSON string length
 
 // Command GPIO pins (direct wire to Arduino, active HIGH pulse)
 #define CMD_FEED_PIN 12  // GPIO12, wire to Arduino Pin 17
@@ -64,9 +64,9 @@ const int MAX_DATA_LENGTH = 200; // Maximum expected JSON string length
 // ----------------------------------------------------------------------------
 
 struct FeedSchedule {
-  int hour;       // 0-23 (24h format)
-  int minute;     // 0-59
-  int duration;   // seconds
+  int hour;      // 0-23 (24h format)
+  int minute;    // 0-59
+  int duration;  // seconds
   bool enabled;
 };
 
@@ -87,9 +87,9 @@ int lastFedHour = -1, lastFedMinute = -1;
 // ----------------------------------------------------------------------------
 
 // Defaults match Arduino hardcoded values (safety fallback)
-float thresholdDO = 4.0;       // mg/L - alert below this
-int thresholdFeed = 20;        // % - alert below this
-int thresholdBattery = 25;     // % - alert below this
+float thresholdDO = 4.0;    // mg/L - alert below this
+int thresholdFeed = 20;     // % - alert below this
+int thresholdBattery = 25;  // % - alert below this
 
 // Alert throttle
 unsigned long lastAlertSMS = 0;
@@ -139,24 +139,26 @@ void checkThresholdsFromJSON(String json) {
     unsigned long now = millis();
     if (now - lastAlertSMS >= ALERT_SMS_COOLDOWN || lastAlertSMS == 0) {
       lastAlertSMS = now;
-      Serial.print("THRESHOLD ALERT: ");
+      Serial.print("THRESHOLD ALERT (logged only, Arduino handles SMS): ");
       Serial.println(reason);
-      // Pulse SMS pin to trigger Arduino SMS
-      digitalWrite(CMD_SMS_PIN, HIGH);
-      delay(500);
-      digitalWrite(CMD_SMS_PIN, LOW);
-      Serial.println("Pulsed SMS pin for threshold alert");
+      // NOTE: SMS pulse removed — Arduino now sends specific per-alert SMS
+      // (low feed / low battery) directly via its own threshold check.
     }
   }
 }
 
 // Get current time based on sync
 void getCurrentTime(int &h, int &m, int &s) {
-  if (!timeSynced) { h = -1; m = -1; s = -1; return; }
+  if (!timeSynced) {
+    h = -1;
+    m = -1;
+    s = -1;
+    return;
+  }
 
-  unsigned long elapsed = (millis() - timeSyncMillis) / 1000; // seconds since sync
+  unsigned long elapsed = (millis() - timeSyncMillis) / 1000;  // seconds since sync
   unsigned long totalSeconds = syncHour * 3600UL + syncMinute * 60UL + syncSecond + elapsed;
-  totalSeconds %= 86400UL; // wrap at 24 hours
+  totalSeconds %= 86400UL;  // wrap at 24 hours
 
   h = totalSeconds / 3600;
   m = (totalSeconds % 3600) / 60;
@@ -194,18 +196,18 @@ void processScheduleCommand(String cmd) {
       timeSyncMillis = millis();
       timeSynced = true;
       Serial.print("Time synced: ");
-      Serial.print(syncHour); Serial.print(":");
-      Serial.print(syncMinute); Serial.print(":");
+      Serial.print(syncHour);
+      Serial.print(":");
+      Serial.print(syncMinute);
+      Serial.print(":");
       Serial.println(syncSecond);
     }
-  }
-  else if (cmd.startsWith("CLEAR_SCHEDULES")) {
+  } else if (cmd.startsWith("CLEAR_SCHEDULES")) {
     scheduleCount = 0;
     lastFedHour = -1;
     lastFedMinute = -1;
     Serial.println("All schedules cleared");
-  }
-  else if (cmd.startsWith("SCHEDULE:")) {
+  } else if (cmd.startsWith("SCHEDULE:")) {
     // Format: SCHEDULE:HH:MM AM/PM,duration,enabled
     // e.g., SCHEDULE:08:00 AM,5,1
     if (scheduleCount >= MAX_SCHEDULES) {
@@ -213,7 +215,7 @@ void processScheduleCommand(String cmd) {
       return;
     }
 
-    String data = cmd.substring(9); // after "SCHEDULE:"
+    String data = cmd.substring(9);  // after "SCHEDULE:"
     int comma1 = data.indexOf(',');
     int comma2 = data.indexOf(',', comma1 + 1);
 
@@ -239,11 +241,14 @@ void processScheduleCommand(String cmd) {
     scheduleCount++;
 
     Serial.print("Schedule added: ");
-    Serial.print(hour); Serial.print(":"); Serial.print(minute);
-    Serial.print(" dur="); Serial.print(duration);
-    Serial.print(" en="); Serial.println(enabled);
-  }
-  else if (cmd.startsWith("THRESHOLD:")) {
+    Serial.print(hour);
+    Serial.print(":");
+    Serial.print(minute);
+    Serial.print(" dur=");
+    Serial.print(duration);
+    Serial.print(" en=");
+    Serial.println(enabled);
+  } else if (cmd.startsWith("THRESHOLD:")) {
     // Format: THRESHOLD:DO,4.0 or THRESHOLD:FEED,55 or THRESHOLD:BATTERY,30
     String data = cmd.substring(10);
     int comma = data.indexOf(',');
@@ -256,14 +261,22 @@ void processScheduleCommand(String cmd) {
 
     if (type == "DO") {
       thresholdDO = val.toFloat();
-      Serial.print("Threshold DO set: "); Serial.println(thresholdDO);
+      Serial.print("Threshold DO set: ");
+      Serial.println(thresholdDO);
     } else if (type == "FEED") {
       thresholdFeed = val.toInt();
-      Serial.print("Threshold Feed set: "); Serial.println(thresholdFeed);
+      Serial.print("Threshold Feed set: ");
+      Serial.println(thresholdFeed);
     } else if (type == "BATTERY") {
       thresholdBattery = val.toInt();
-      Serial.print("Threshold Battery set: "); Serial.println(thresholdBattery);
+      Serial.print("Threshold Battery set: ");
+      Serial.println(thresholdBattery);
     }
+
+    // Forward to Arduino so it uses the same slider values for auto-SMS
+    Serial2.println(cmd);
+    Serial.print("Forwarded threshold to Arduino: ");
+    Serial.println(cmd);
   }
 }
 
@@ -286,7 +299,9 @@ void checkSchedules() {
       lastFedMinute = m;
 
       Serial.print("SCHEDULED FEED at ");
-      Serial.print(h); Serial.print(":"); Serial.println(m);
+      Serial.print(h);
+      Serial.print(":");
+      Serial.println(m);
 
       // Pulse feed GPIO (same as Feed Now)
       digitalWrite(CMD_FEED_PIN, HIGH);
@@ -308,51 +323,51 @@ void checkSchedules() {
 // 4) BLE Callback Classes
 // ----------------------------------------------------------------------------
 
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      Serial.println("BLE Client Connected");
-    };
+class MyServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer *pServer) {
+    deviceConnected = true;
+    Serial.println("BLE Client Connected");
+  };
 
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-      Serial.println("BLE Client Disconnected");
-    }
+  void onDisconnect(BLEServer *pServer) {
+    deviceConnected = false;
+    Serial.println("BLE Client Disconnected");
+  }
 };
 
 // Callback for receiving commands from the app
-class CommandCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      String rxValue = pCharacteristic->getValue().c_str();
+class CommandCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    String rxValue = pCharacteristic->getValue().c_str();
 
-      if (rxValue.length() > 0) {
-        Serial.print("Received command from app: ");
+    if (rxValue.length() > 0) {
+      Serial.print("Received command from app: ");
+      Serial.println(rxValue);
+
+      // Forward command to Arduino via GPIO pulse
+      if (rxValue.startsWith("FEED")) {
+        digitalWrite(CMD_FEED_PIN, HIGH);
+        delay(500);
+        digitalWrite(CMD_FEED_PIN, LOW);
+        Serial.println("Pulsed FEED pin HIGH for 500ms");
+      } else if (rxValue.startsWith("TEST_SMS")) {
+        digitalWrite(CMD_SMS_PIN, HIGH);
+        delay(500);
+        digitalWrite(CMD_SMS_PIN, LOW);
+        Serial.println("Pulsed SMS pin HIGH for 500ms");
+      } else if (rxValue.startsWith("PHONE:")) {
+        // Forward phone number to Arduino via Serial2 TX
+        Serial2.println(rxValue);
+        Serial.print("Forwarded to Arduino: ");
         Serial.println(rxValue);
-
-        // Forward command to Arduino via GPIO pulse
-        if (rxValue.startsWith("FEED")) {
-          digitalWrite(CMD_FEED_PIN, HIGH);
-          delay(500);
-          digitalWrite(CMD_FEED_PIN, LOW);
-          Serial.println("Pulsed FEED pin HIGH for 500ms");
-        } else if (rxValue.startsWith("TEST_SMS")) {
-          digitalWrite(CMD_SMS_PIN, HIGH);
-          delay(500);
-          digitalWrite(CMD_SMS_PIN, LOW);
-          Serial.println("Pulsed SMS pin HIGH for 500ms");
-        } else if (rxValue.startsWith("PHONE:")) {
-          // Forward phone number to Arduino via Serial2 TX
-          Serial2.println(rxValue);
-          Serial.print("Forwarded to Arduino: ");
-          Serial.println(rxValue);
-        } else if (rxValue.startsWith("SYNC_TIME") || rxValue.startsWith("SCHEDULE") || rxValue.startsWith("CLEAR_SCHEDULES") || rxValue.startsWith("THRESHOLD")) {
-          processScheduleCommand(rxValue);
-        } else {
-          Serial.print("Unknown command: ");
-          Serial.println(rxValue);
-        }
+      } else if (rxValue.startsWith("SYNC_TIME") || rxValue.startsWith("SCHEDULE") || rxValue.startsWith("CLEAR_SCHEDULES") || rxValue.startsWith("THRESHOLD")) {
+        processScheduleCommand(rxValue);
+      } else {
+        Serial.print("Unknown command: ");
+        Serial.println(rxValue);
       }
     }
+  }
 };
 
 // ----------------------------------------------------------------------------
@@ -362,16 +377,16 @@ class CommandCallbacks: public BLECharacteristicCallbacks {
 void setup() {
   // Initialize USB Serial for debugging
   Serial.begin(115200);
-  delay(500); // Short delay for serial to settle (no blocking wait)
+  delay(500);  // Short delay for serial to settle (no blocking wait)
 
   // Serial2: RX from Arduino (data), TX to Arduino (phone number commands)
-  Serial2.begin(9600, SERIAL_8N1, 26, ARDUINO_TX_PIN); // RX=GPIO26, TX=GPIO14
+  Serial2.begin(9600, SERIAL_8N1, 26, ARDUINO_TX_PIN);  // RX=GPIO26, TX=GPIO14
 
   // Command GPIO pins
   pinMode(CMD_FEED_PIN, OUTPUT);
   pinMode(CMD_SMS_PIN, OUTPUT);
-  digitalWrite(CMD_FEED_PIN, LOW);   // Idle LOW (Arduino has 1K pull-down, detects HIGH pulse)
-  digitalWrite(CMD_SMS_PIN, LOW);    // Idle LOW (Arduino has 1K pull-down, detects HIGH pulse)
+  digitalWrite(CMD_FEED_PIN, LOW);  // Idle LOW (Arduino has 1K pull-down, detects HIGH pulse)
+  digitalWrite(CMD_SMS_PIN, LOW);   // Idle LOW (Arduino has 1K pull-down, detects HIGH pulse)
 
   Serial.println("ESP32 OxyFeeder Communicator v3.0 Starting...");
   Serial.println("Serial2 initialized for Arduino communication");
@@ -386,18 +401,14 @@ void setup() {
 
   // Create BLE Characteristic for sending data TO app (READ + NOTIFY)
   pCharacteristic = pService->createCharacteristic(
-                      CHARACTERISTIC_UUID,
-                      BLECharacteristic::PROPERTY_READ |
-                      BLECharacteristic::PROPERTY_NOTIFY
-                    );
+    CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
   pCharacteristic->addDescriptor(new BLE2902());
 
   // Create BLE Characteristic for receiving commands FROM app (WRITE)
   pCommandCharacteristic = pService->createCharacteristic(
-                      COMMAND_CHAR_UUID,
-                      BLECharacteristic::PROPERTY_WRITE |
-                      BLECharacteristic::PROPERTY_WRITE_NR
-                    );
+    COMMAND_CHAR_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
   pCommandCharacteristic->setCallbacks(new CommandCallbacks());
 
   // Start the service
@@ -436,9 +447,11 @@ void loop() {
       getCurrentTime(h, m, s);
       Serial.print(" | Time: ");
       if (h < 10) Serial.print("0");
-      Serial.print(h); Serial.print(":");
+      Serial.print(h);
+      Serial.print(":");
       if (m < 10) Serial.print("0");
-      Serial.print(m); Serial.print(":");
+      Serial.print(m);
+      Serial.print(":");
       if (s < 10) Serial.print("0");
       Serial.print(s);
     }
@@ -498,7 +511,7 @@ void loop() {
 
   if (deviceConnected && !oldDeviceConnected) {
     // Client just connected - wait for real data from Arduino
-    delay(1000); // Give client time to set up notifications
+    delay(1000);  // Give client time to set up notifications
     Serial.println("BLE client connected - waiting for real sensor data");
     oldDeviceConnected = deviceConnected;
   }

@@ -127,10 +127,10 @@ const int HOPPER_FULL_CM  = 5;   // Distance (cm) when hopper is full
 const float DO_VOLTAGE_REF = 5.0;
 const float DO_MAX_VALUE = 20.0;     // Max mg/L at max voltage
 
-// Safety thresholds
-const float DO_CRITICAL_THRESHOLD = 4.0;  // mg/L - trigger alarm below this
-const int LOW_FEED_THRESHOLD = 10;        // % - trigger warning below this
-const int LOW_BATTERY_THRESHOLD = 10;     // % - trigger warning below this
+// Safety thresholds (mutable — synced from app via THRESHOLD:X,Y command)
+float DO_CRITICAL_THRESHOLD = 4.0;  // mg/L - trigger alarm below this
+int LOW_FEED_THRESHOLD = 10;        // % - trigger warning below this
+int LOW_BATTERY_THRESHOLD = 10;     // % - trigger warning below this
 
 // Voltage sensor calibration
 // 0-25V module with voltage divider ratio of 5:1
@@ -184,6 +184,11 @@ bool lastFeedingDone = false;  // Prevents repeated feeding in same minute
 // SMS cooldown to prevent spam
 unsigned long lastSmsSent = 0;
 const unsigned long SMS_COOLDOWN = 10000;  // 10 seconds (testing mode)
+
+// Per-alert SMS timers — prevent re-sending same alert too often
+unsigned long lastLowFeedSms = 0;
+unsigned long lastLowBatterySms = 0;
+const unsigned long ALERT_SMS_INTERVAL = 3600000UL;  // 1 hour between same-type alerts
 
 // SMS Phone Number (stored in EEPROM)
 #define EEPROM_PHONE_ADDR 0       // EEPROM starting address for phone number
@@ -848,22 +853,54 @@ void sendSMS(const char* message) {
   Serial.println(smsPhoneNumber);
   Serial.print(F("[GSM] Message: "));
   Serial.println(message);
-  
+
   // Clear any leftover data in SIM800L buffer
   while (Serial3.available()) Serial3.read();
 
-  // Check SIM PIN status
-  Serial3.println(F("AT+CPIN?"));
-  delay(1000);
+  // Retry CPIN check up to 3 times — module sometimes needs a moment to settle
+  // after a previous failed attempt. If still failing, do a soft reset.
   String pinResponse = "";
-  while (Serial3.available()) {
-    char c = Serial3.read();
-    pinResponse += c;
+  bool simReady = false;
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    Serial3.println(F("AT+CPIN?"));
+    delay(1500);
+    pinResponse = "";
+    while (Serial3.available()) {
+      char c = Serial3.read();
+      pinResponse += c;
+    }
+    Serial.print(F("[GSM] CPIN attempt "));
+    Serial.print(attempt);
+    Serial.print(F(": "));
+    Serial.println(pinResponse);
+    if (pinResponse.indexOf("READY") != -1) {
+      simReady = true;
+      break;
+    }
+    delay(500);
   }
-  Serial.print(F("[GSM] PIN status: "));
-  Serial.println(pinResponse);
-  if (pinResponse.indexOf("READY") == -1) {
-    Serial.println(F("[GSM] ERROR: SIM not ready (PIN locked or not inserted)"));
+
+  // If still not ready after 3 tries, soft-reset the SIM800L and try once more
+  if (!simReady) {
+    Serial.println(F("[GSM] SIM not responding — soft-resetting module..."));
+    Serial3.println(F("AT+CFUN=1,1"));
+    delay(8000);  // wait for module to reboot
+    while (Serial3.available()) Serial3.read();  // flush boot messages
+
+    Serial3.println(F("AT+CPIN?"));
+    delay(1500);
+    pinResponse = "";
+    while (Serial3.available()) {
+      char c = Serial3.read();
+      pinResponse += c;
+    }
+    Serial.print(F("[GSM] CPIN after reset: "));
+    Serial.println(pinResponse);
+    if (pinResponse.indexOf("READY") != -1) simReady = true;
+  }
+
+  if (!simReady) {
+    Serial.println(F("[GSM] ERROR: SIM not ready after retries + reset"));
     return;
   }
 
@@ -1003,6 +1040,10 @@ void checkSafetyAlerts() {
     if (nowAlert - lastWarningPrint >= 10000) {
       Serial.println(F("[WARNING] Low feed level detected"));
     }
+    if (lastLowFeedSms == 0 || nowAlert - lastLowFeedSms >= ALERT_SMS_INTERVAL) {
+      lastLowFeedSms = nowAlert;
+      sendSMS("OxyFeeder ALERT: Low feed level! Please refill the hopper.");
+    }
   }
 
   // Check for low battery
@@ -1010,6 +1051,10 @@ void checkSafetyAlerts() {
     anyAlert = true;
     if (nowAlert - lastWarningPrint >= 10000) {
       Serial.println(F("[WARNING] Low battery detected"));
+    }
+    if (lastLowBatterySms == 0 || nowAlert - lastLowBatterySms >= ALERT_SMS_INTERVAL) {
+      lastLowBatterySms = nowAlert;
+      sendSMS("OxyFeeder ALERT: Low battery! Please check power system.");
     }
   }
 
@@ -1106,8 +1151,8 @@ void processIncomingCommands() {
     if (c == '\n' || c == '\r') {
       if (serial1Buffer.length() > 0) {
         serial1Buffer.trim();
-        if (serial1Buffer.startsWith("PHONE:")) {
-          Serial.print(F("[ESP32] Phone command: "));
+        if (serial1Buffer.startsWith("PHONE:") || serial1Buffer.startsWith("THRESHOLD:")) {
+          Serial.print(F("[ESP32] Command: "));
           Serial.println(serial1Buffer);
           handleCommand(serial1Buffer);
         }
@@ -1210,6 +1255,36 @@ void handleCommand(String command) {
     Serial.println(F("[CMD] Sending test SMS..."));
     sendSMS("OxyFeeder Test: SMS system is working!");
     Serial1.println(F("{\"cmd\":\"TEST_SMS\",\"status\":\"OK\"}"));
+  }
+  else if (cmdType == "THRESHOLD") {
+    // Sync threshold from app — format: THRESHOLD:TYPE,VALUE
+    // e.g. THRESHOLD:FEED,15  |  THRESHOLD:BATTERY,20  |  THRESHOLD:DO,4.5
+    int commaIndex = cmdValue.indexOf(',');
+    if (commaIndex == -1) {
+      Serial.println(F("[CMD] Invalid THRESHOLD format (no comma)"));
+    } else {
+      String thresholdType = cmdValue.substring(0, commaIndex);
+      String thresholdVal = cmdValue.substring(commaIndex + 1);
+      thresholdType.trim();
+      thresholdVal.trim();
+
+      if (thresholdType == "FEED") {
+        LOW_FEED_THRESHOLD = thresholdVal.toInt();
+        Serial.print(F("[CMD] Low feed threshold updated to: "));
+        Serial.println(LOW_FEED_THRESHOLD);
+      } else if (thresholdType == "BATTERY") {
+        LOW_BATTERY_THRESHOLD = thresholdVal.toInt();
+        Serial.print(F("[CMD] Low battery threshold updated to: "));
+        Serial.println(LOW_BATTERY_THRESHOLD);
+      } else if (thresholdType == "DO") {
+        DO_CRITICAL_THRESHOLD = thresholdVal.toFloat();
+        Serial.print(F("[CMD] DO critical threshold updated to: "));
+        Serial.println(DO_CRITICAL_THRESHOLD);
+      } else {
+        Serial.print(F("[CMD] Unknown threshold type: "));
+        Serial.println(thresholdType);
+      }
+    }
   }
   else if (cmdType == "GET_PHONE") {
     // Get current phone number
