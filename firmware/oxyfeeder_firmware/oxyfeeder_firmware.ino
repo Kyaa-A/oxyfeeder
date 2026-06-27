@@ -64,7 +64,7 @@
 // ============================================================================
 
 // Sensors (UPDATED after bench testing - Feb 2026)
-#define DO_SENSOR_PIN       A1    // Dissolved Oxygen (Analog)
+#define DO_SENSOR_PIN       A3    // Dissolved Oxygen (Analog) — moved from A1 for testing
 #define VOLTAGE_SENSOR_PIN  A2    // Battery Voltage (A0 DAMAGED - moved to A2)
 // #define HX711_DT_PIN        10    // LOAD CELL - uncomment if switching back
 // #define HX711_SCK_PIN       11    // LOAD CELL - uncomment if switching back
@@ -512,18 +512,29 @@ void initGSM() {
 float readDissolvedOxygen() {
   // Read analog value from DFRobot DO sensor
   int rawValue = analogRead(DO_SENSOR_PIN);
-  
+
   // Convert to voltage
   float voltage = (rawValue / 1023.0) * DO_VOLTAGE_REF;
-  
+
+  // [CALIBRATION DEBUG] Remove after CAL_0 and CAL_SAT are recorded
+  static unsigned long lastCalPrint = 0;
+  if (millis() - lastCalPrint >= 1000) {
+    lastCalPrint = millis();
+    Serial.print(F("[DO CAL] Raw ADC: "));
+    Serial.print(rawValue);
+    Serial.print(F(" | Voltage: "));
+    Serial.print(voltage, 4);
+    Serial.println(F(" V"));
+  }
+
   // Convert voltage to DO value (mg/L)
   // DFRobot sensor typically outputs 0-3V for 0-20 mg/L
   // Adjust this calibration based on your specific sensor
   float doValue = (voltage / 3.0) * DO_MAX_VALUE;
-  
+
   // Clamp to valid range
   doValue = constrain(doValue, 0.0, 20.0);
-  
+
   return doValue;
 }
 
