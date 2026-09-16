@@ -17,7 +17,7 @@
  */
 
 // Test phone number - CHANGE THIS to your number!
-#define TEST_PHONE_NUMBER "09639192343"
+#define TEST_PHONE_NUMBER "09550717546"
 
 void setup() {
   // USB Serial for debugging

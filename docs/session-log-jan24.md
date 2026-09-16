@@ -33,7 +33,7 @@
 - Confirmed working using nRF Connect app on phone
 
 ### 4. Configuration Updated
-- Phone number for SMS alerts: `+639639192343`
+- Phone number for SMS alerts: `+639550717546`
 - Feeding times: 08:00 and 17:00
 - DO critical threshold: 4.0 mg/L
 
@@ -145,7 +145,7 @@ Added ability to configure SMS phone number from the app instead of hardcoding i
   - `FEED:5` - Trigger manual feeding
   - `TEST_SMS:1` - Send test SMS
   - `GET_PHONE:1` - Get current phone number
-- Default phone number: `+639639192343`
+- Default phone number: `+639550717546`
 
 **2. ESP32 Firmware (`esp32_communicator.ino`):**
 - Added WRITE characteristic for receiving commands from app
