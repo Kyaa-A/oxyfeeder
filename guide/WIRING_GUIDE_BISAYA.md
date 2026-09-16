@@ -1,8 +1,14 @@
 # OxyFeeder — Kompletong Wiring Guide (Bag-ong Wiring)
 
 **Para kang kinsa:** ang mag-wire sa system
-**Petsa:** Sept 16, 2026
+**Petsa:** Sept 16, 2026 · **Rev 2**
 **Status sa daan nga wiring:** GUBA — kinahanglan tanggalon TANAN ug sugdan pag-usab
+
+> ### 🔴 REV 2 — KUNG NAKITA NIMO ANG REV 1, AYAW NA GAMITA
+> Tulo ka sayop ang na-tul-id. Kung nagsugod na ka gamit ang daan nga kopya, susiha ni:
+> 1. **Ultrasonic:** **Pin 13 (TRIG) ug Pin 48 (ECHO)** — dili Pin 22/23/24/25. Ug **usa ra** ka sensor, dili duha.
+> 2. **Load cell / HX711:** **AYAW NA I-WIRE.** Wala na gigamit — ang ultrasonic na ang mosukod sa feed level.
+> 3. **Bag-ong wire nga nakalimtan:** **ESP32 GPIO22 → Arduino Pin 19 (RX1).** Kinahanglan ni para sa schedules ug phone number.
 
 ---
 
@@ -29,10 +35,10 @@ Kung usa ra ani ang malapas, maguba ang board. Naa nay 4 ka patay nga pin sa Ard
 - [ ] ESP32-CAM
 - [ ] TFT LCD 4.0" ST7796S (480x320)
 - [ ] DO Sensor (DFRobot SEN0237)
-- [ ] Ultrasonic Sensor x2 (HC-SR04)
+- [ ] Ultrasonic Sensor (HC-SR04) — **usa ra ang gamiton**
 - [ ] RTC Module DS3231
 - [ ] Voltage Sensor
-- [ ] Load Cell + HX711
+- [ ] ~~Load Cell + HX711~~ — **DILI NA GAMITON** (gipulihan sa ultrasonic)
 - [ ] SIM800L V2 (asul nga board)
 - [ ] Servo Motor
 - [ ] DC Motor
@@ -87,7 +93,7 @@ Ang servo ug ang GSM mo-hatag og kalit nga dako nga current (ang SIM800L mo-abot
 
 | Rail | Converter | Kinsa naka-sumpay |
 |------|-----------|-------------------|
-| **5V LOGIC** | Buck **5A** | Arduino, ESP32, TFT LCD, RTC, DO, Ultrasonic x2, Voltage sensor, HX711 |
+| **5V LOGIC** | Buck **5A** | Arduino, ESP32, TFT LCD, RTC, DO, Ultrasonic, Voltage sensor |
 | **5V POWER** | Buck **3A** | Servo, SIM800L, ESP32-CAM |
 | **GND** | — | TANAN. Walay exception. |
 
@@ -238,6 +244,23 @@ Arduino Pin 1 (TX0)
 - [ ] **7.10** — Pull-down: `Arduino Pin 17 → 10K resistor → GND bus bar`
 - [ ] **7.11** — Pull-down: `Arduino Pin 3 → 10K resistor → GND bus bar`
 
+### ⚠️ Commands: ESP32 → Arduino (Serial — AYAW NI KALIMTI)
+
+Gawas sa duha ka GPIO pulse sa taas, naa pay **usa ka serial wire** nga kinahanglan.
+Dinhi moagi ang **phone number, feeding schedules, ug ang mga reply** gikan sa app.
+
+| GIKAN | PADULONG |
+|-------|----------|
+| **ESP32 GPIO22** | Arduino **Pin 19 (RX1)** |
+
+- [ ] **7.12** — `ESP32 GPIO22 → Arduino Pin 19` — direktang wire, **walay resistor, walay divider**
+
+> **Ngano walay divider diri?** 3.3V ang gikan sa ESP32 padulong sa 5V nga Arduino input — okay ra na,
+> dili makadaot. Ang divider kinahanglan ra kung 5V padulong sa 3.3V (sama sa Pin 1 → GPIO26).
+>
+> **Kung makalimtan ni nga wire:** mogana gihapon ang live data ug ang Feed Now,
+> pero **dili mo-save ang schedules ug ang phone number** gikan sa app.
+
 > **10K gyud, dili 1K.** Ang 1K sobra ka kusog, mo-birada sa signal paubos ug dili mo-trigger.
 >
 > **Ayaw gamita ang D2 ug D5 sa ESP32** — luya na ang output. **Ayaw gamita ang Arduino Pin 2** — patay.
@@ -299,27 +322,34 @@ Arduino Pin 1 (TX0)
 - [ ] **9.3** — Sumpaya
 - [ ] **9.4** — **Susiha ang coin cell (CR2032).** Sukda: dapat **2.8V pataas**. Kung ubos, ilisi. Kung uga, mo-00 gihapon ang oras kada patay sa kuryente.
 
-### HX711 + Load Cell
+### HX711 + Load Cell — ⛔ AYAW NA I-WIRE (WALA NA GIGAMIT)
+
+> **Laktawi ni nga step.** Ang load cell **gi-ilisan na sa ultrasonic sensor** para sa feed level.
+> Sa firmware, naka-comment out na ang tanang HX711 code (`// #include <HX711.h>`).
+> Kung i-wire nimo ni, **walay mahitabo** — walay mobasa niini.
+>
+> Ipadaplin lang ang HX711 ug ang load cell. Ayaw i-sumpay sa Arduino.
+
+- [ ] **9.5** — Siguroha nga **WALAY** wire sa Arduino Pin 10 ug Pin 11. Dapat bakante.
+
+### Ultrasonic Sensor (HC-SR04) — kini na ang feed level sensor
+
+> **USA ra ka sensor ang gigamit sa firmware**, dili duha. Kini ang mipuli sa load cell
+> para sa pagsukod sa feed level sa hopper.
 
 | GIKAN | PADULONG |
 |-------|----------|
-| **5V LOGIC bus bar** | HX711 **VCC** |
-| **GND bus bar** | HX711 **GND** |
-| HX711 **DT** | Arduino **Pin 10** |
-| HX711 **SCK** | Arduino **Pin 11** |
+| **5V LOGIC bus bar** | HC-SR04 **VCC** |
+| **GND bus bar** | HC-SR04 **GND** |
+| Arduino **Pin 13** | HC-SR04 **TRIG** |
+| Arduino **Pin 48** | HC-SR04 **ECHO** |
 
-- [ ] **9.5** — **Pin 10 ug 11 gyud.** Patay ang Pin 8 ug 9.
-- [ ] **9.6** — Load cell wire → HX711 (E+, E-, A+, A-) sumala sa kolor sa load cell
-
-### Ultrasonic Sensors (HC-SR04) — BAG-O
-
-| Sensor | VCC | GND | TRIG | ECHO |
-|--------|-----|-----|------|------|
-| **Ultrasonic #1** | 5V LOGIC bus bar | GND bus bar | Arduino **Pin 22** | Arduino **Pin 23** |
-| **Ultrasonic #2** | 5V LOGIC bus bar | GND bus bar | Arduino **Pin 24** | Arduino **Pin 25** |
-
-- [ ] **9.7** — Sumpaya ang duha ka sensor
+- [ ] **9.6** — Sumpaya ang 4 ka wire. **Pin 13 (TRIG) ug Pin 48 (ECHO)** — mao ni ang naa sa firmware.
+- [ ] **9.7** — Ibutang ang sensor sa **taas nga bahin sa hopper, nag-atubang paubos**, patag ug walay babag
 - [ ] Dili kinahanglan og voltage divider sa ECHO — 5V pod ang Arduino Mega, okay ra
+- [ ] **NOTE:** normal nga mo-kislap ang onboard LED (L) sa Arduino — ang Pin 13 naka-sumpay ana. Dili na guba.
+
+> **Kung naa kay ikaduha nga ultrasonic:** ipadaplin lang. Usa ra ang gisuportahan sa firmware karon.
 
 ---
 
@@ -421,20 +451,19 @@ I-print ni ug ibutang tapad sa Arduino.
 | **Pin 5** | L298N IN2 |
 | **Pin 6** | Servo signal |
 | **Pin 7** | Buzzer + |
-| **Pin 10** | HX711 DT |
-| **Pin 11** | HX711 SCK |
+| **Pin 10** | *(bakante — HX711 wala na gigamit)* |
+| **Pin 11** | *(bakante — HX711 wala na gigamit)* |
+| **Pin 13** | Ultrasonic TRIG |
 | **Pin 12** | L298N ENA |
 | **Pin 14 (TX3)** | SIM800L RXD |
 | **Pin 15 (RX3)** | SIM800L TXD |
 | **Pin 17** | ESP32 D12 (Feed cmd) + 10K pull-down |
+| **Pin 19 (RX1)** | ESP32 GPIO22 (schedules / phone number) |
 | **Pin 20 (SDA)** | RTC SDA |
 | **Pin 21 (SCL)** | RTC SCL |
-| **Pin 22** | Ultrasonic #1 TRIG |
-| **Pin 23** | Ultrasonic #1 ECHO |
-| **Pin 24** | Ultrasonic #2 TRIG |
-| **Pin 25** | Ultrasonic #2 ECHO |
 | **Pin 38** | LCD DC |
 | **Pin 40** | LCD CS |
+| **Pin 48** | Ultrasonic ECHO |
 | **Pin 51 (MOSI)** | LCD SDI |
 | **Pin 52 (SCK)** | LCD SCK |
 | **A2** | Voltage sensor signal |
@@ -460,6 +489,7 @@ I-print ni ug ibutang tapad sa Arduino.
 | **GPIO26** | Voltage divider junction (data gikan sa Arduino TX0) |
 | **GPIO12 (D12)** | Arduino Pin 17 (Feed) |
 | **GPIO13 (D13)** | Arduino Pin 3 (SMS) |
+| **GPIO22** | Arduino Pin 19 / RX1 (schedules, phone number) |
 
 **Patay nga ESP32 pin:** D2, D5 (luya na ang output), GPIO4 ug GPIO17 (guba ang UART TX)
 
@@ -478,7 +508,7 @@ Andama: multimeter probe sa **5V bus bar** ug **GND bus bar**.
 | **T2** | Sumpaya ang **Arduino** ra. ON. | **4.95V pataas.** Mo-sidlak ang Arduino LED. | [ ] |
 | **T3** | Dugang ang **ESP32**. ON. | **4.90V pataas.** Ang ESP32 LED **steady** — dili nagkurap-kurap. | [ ] |
 | **T4** | Dugang ang **LCD**. ON. | **4.85V pataas.** Mo-display ang LCD. | [ ] |
-| **T5** | Dugang ang **RTC, DO, Ultrasonic x2, Voltage sensor, HX711**. ON. | **4.85V pataas** | [ ] |
+| **T5** | Dugang ang **RTC, DO, Ultrasonic, Voltage sensor**. ON. | **4.85V pataas** | [ ] |
 | **T6** | Dugang ang **SIM800L**. ON. | POWER rail **4.80V pataas.** Mo-blink ang network LED (hinay nga blink = naka-network na) | [ ] |
 | **T7** | Dugang ang **Servo + L298N**. ON. Test og lihok. | Mo-ubos gamay inig lihok, pero **dili mo-reset ang ESP32** | [ ] |
 | **T8** | Dugang ang **ESP32-CAM + Fan**. ON. | Tanan stable, walay nagkurap | [ ] |
@@ -493,7 +523,7 @@ Andama: multimeter probe sa **5V bus bar** ug **GND bus bar**.
 - [ ] **F2** — Steady ang ESP32 LED
 - [ ] **F3** — Naay basa ang Voltage sensor sa LCD (dapat mga 12–13V)
 - [ ] **F4** — Naay oras ang RTC sa LCD (dili 00:00)
-- [ ] **F5** — Naay basa ang load cell / feed level
+- [ ] **F5** — Naay basa ang feed level (gikan sa ultrasonic, dili load cell)
 - [ ] **F6** — Ma-connect ang app sa BLE ("OxyFeeder")
 - [ ] **F7** — Mo-abot ang data sa app (DO, feed, battery)
 - [ ] **F8** — "Feed Now" sa app → mo-lihok ang servo
@@ -536,10 +566,12 @@ Andama: multimeter probe sa **5V bus bar** ug **GND bus bar**.
 
 ## 18. PARA SA MAG-FIRMWARE (dili wiring, pero ayaw kalimti)
 
-1. **`dispenseFeed()` kinahanglan BLOCKING** (delay-based). Ang HX711 mo-disable sa interrupts, mo-guba sa servo PWM. Ayaw balika ang state machine.
+1. **`dispenseFeed()` kinahanglan BLOCKING** (delay-based). Kini gikan sa daan nga HX711 issue (mo-disable siya sa interrupts ug mo-guba sa servo PWM). Bisag wala na ang HX711, ang blocking nga code mao gihapon ang naa sa firmware — ayaw usba kung dili pa ma-test.
 2. Ang Pin 17 ug Pin 3 kinahanglan **`INPUT`**, dili `INPUT_PULLUP` — mag-away sa pull-down resistor.
 3. Serial baud: **9600** (Arduino → ESP32)
 4. ESP32 Serial2: **RX = GPIO26**, walay TX
 5. 15-second startup delay sa wala pa mo-basa ang GPIO commands (para dili mag-false trigger)
 6. DO calibration: naa nay debug print (`[DO CAL] Raw ADC: X | Voltage: X.XXXX V`) — andam na inig abot sa electrolyte
-7. Bag-o nga code kinahanglan para sa **ultrasonic x2** (Pin 22/23 ug 24/25) — wala pa ni sa firmware
+7. Ang **load cell/HX711 naka-comment out na** sa firmware — ang ultrasonic (Pin 13/48) na ang feed level sensor
+8. Ang hopper calibration naa sa `HOPPER_EMPTY_CM = 37` ug `HOPPER_FULL_CM = 5` — usba ni sumala sa aktuwal nga hopper
+9. Ang ESP32 mo-send og commands sa Arduino **Pin 19 (RX1)** gikan sa **GPIO22** — dili lang GPIO pulse
