@@ -1,14 +1,15 @@
 # OxyFeeder — Kompletong Wiring Guide (Bag-ong Wiring)
 
 **Para kang kinsa:** ang mag-wire sa system
-**Petsa:** Sept 16, 2026 · **Rev 2**
+**Petsa:** Sept 27, 2026 · **Rev 3**
 **Status sa daan nga wiring:** GUBA — kinahanglan tanggalon TANAN ug sugdan pag-usab
 
-> ### 🔴 REV 2 — KUNG NAKITA NIMO ANG REV 1, AYAW NA GAMITA
-> Tulo ka sayop ang na-tul-id. Kung nagsugod na ka gamit ang daan nga kopya, susiha ni:
-> 1. **Ultrasonic:** **Pin 13 (TRIG) ug Pin 48 (ECHO)** — dili Pin 22/23/24/25. Ug **usa ra** ka sensor, dili duha.
-> 2. **Load cell / HX711:** **AYAW NA I-WIRE.** Wala na gigamit — ang ultrasonic na ang mosukod sa feed level.
-> 3. **Bag-ong wire nga nakalimtan:** **ESP32 GPIO22 → Arduino Pin 19 (RX1).** Kinahanglan ni para sa schedules ug phone number.
+> ### 🔴 REV 3 — GAMITA NI, AYAW ANG DAAN NGA KOPYA
+> **Rev 2 (Sept 16):** ultrasonic = **Pin 13/48** (dili 22/23/24/25, ug **usa ra**) · HX711 **ayaw na i-wire** · dugang nga wire **ESP32 GPIO22 → Arduino Pin 19**
+> **Rev 3 (Sept 27):** buzzer **5V active na** (naa na, dili na 12V) · DO sensor **calibrated na** · dugang **smoothing capacitor** sa rail
+>
+> ⚠️ **Kung naay lain nga AI o lain nga listahan nga mo-ingon og "DO sensor → A1" — SAYOP NA.**
+> **PATAY ang A1.** Ang DO sensor naa sa **A3**.
 
 ---
 
@@ -58,6 +59,7 @@ Kung usa ra ani ang malapas, maguba ang board. Naa nay 4 ka patay nga pin sa Ard
 - [ ] Resistor **1K — 3 ka buok** (voltage divider)
 - [ ] Resistor **10K — 2 ka buok** (pull-down)
 - [ ] Capacitor **1000uF 16V — 1 ka buok** (para sa SIM800L)
+- [ ] Capacitor **470uF 16V — 2 ka buok** (smoothing sa kada 5V rail)
 - [ ] Wire **18AWG** (power) ug **22AWG** (signal)
 - [ ] Heat shrink / electrical tape
 - [ ] **Multimeter** — KINAHANGLAN GYUD. Ayaw sugdi kung wala.
@@ -179,6 +181,10 @@ Charge Controller (MPPT)   <-- ang BATTERY i-sumpay UNA, dili ang panel
 - [ ] **5.12** — `Converter 5A OUT- → GND bus bar`
 - [ ] **5.13** — `Converter 3A OUT+ → 5V POWER bus bar` (18AWG)
 - [ ] **5.14** — `Converter 3A OUT- → GND bus bar`
+- [ ] **5.15** — **Smoothing capacitor:** i-solder ang **470uF** tapat sa kada 5V bus bar (+ sa 5V, – sa GND)
+  - Usa sa LOGIC rail, usa sa POWER rail
+  - Taas nga paa = **+**. Mubo nga paa (naay puti nga guhit) = **–**. **Kung mabaliktad, mobuto.**
+  - Kini ang mo-absorb sa kalit nga current spike — mao ni ang mo-pugong sa pag-reset sa ESP32
 
 ---
 
@@ -418,7 +424,7 @@ Dinhi moagi ang **phone number, feeding schedules, ug ang mga reply** gikan sa a
 | **GND bus bar** | Buzzer **–** |
 
 - [ ] **11.6** — Ang buzzer naa sa **lid (gawas)** sa enclosure
-- [ ] NOTE: 12V pa ang buzzer karon — mahuyang ang tingog. Naghulat pa og 5V active buzzer.
+- [ ] Gamita ang **5V active buzzer** (gi-ilisan na ang daan nga 12V panel buzzer)
 
 ---
 
@@ -540,7 +546,8 @@ Andama: multimeter probe sa **5V bus bar** ug **GND bus bar**.
 | Puti ang LCD | Naka-USB ang Arduino | Normal. Tanggala ang USB, gamit main power ra. |
 | Itom ang LCD, walay gikan | Kulang 5V o luag ang SPI wire | Sukda ang VCC **sa LCD mismo**, dili sa bus bar. Susiha ang 6 ka SPI wire. |
 | Ubos ang boltahe sa rail | Gagmay ra ang wire | Ilisi og 18AWG gikan sa converter ngadto sa bus bar |
-| **DO = 0.00** | **UGA ang probe — walay electrolyte** | **DILI ni wiring problem.** Naghulat pa ta og NaOH 0.5 mol/L. Ayaw og pangita og sayop sa wiring. |
+| **DO = 0.00** | Naka-wire sa **A1** imbes **A3** | **Susiha ni una.** Patay ang A1 — 0 gyud ang basa bisag unsa. Balhina sa **A3**. |
+| DO naay basa pero sayop | Nawad-an og electrolyte ang probe | Na-calibrate na ni (zero solution + air). Kung mo-drift, i-recalibrate. |
 | **RTC = 00:00** | Patay ang coin cell, o dili makita sa I2C | Sukda ang CR2032 (2.8V pataas). I-run ang I2C scanner — dapat makita ang **0x68**. |
 | Mo-reset ang ESP32 inig lihok sa servo | Parehas silag rail | Ibalhin ang servo sa **POWER rail** |
 | Walay data sa app | Nabuak ang voltage divider, o dili common ang GND | Sukda ang junction: dapat **mga 3V** samtang nag-send ang Arduino |
