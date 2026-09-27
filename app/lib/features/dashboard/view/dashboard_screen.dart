@@ -479,7 +479,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   icon: Icons.inventory_2_outlined,
                   progress: status.feedLevel / 100.0,
                   description: 'Feed Level shows the remaining fish pellets in the hopper as a percentage. When it drops too low, the system sends an alert so you can refill before the next scheduled feeding.',
-                  howItWorks: 'A load cell sensor weighs the hopper continuously and converts the weight to a percentage based on the full capacity. Readings are updated in real time.',
+                  howItWorks: 'An ultrasonic sensor at the top of the hopper measures the distance down to the surface of the pellets, and that distance is converted to a percentage. A short distance means a full hopper. Readings are updated in real time.',
                   threshold: 'Currently set to alert below ${settingsVm.lowFeedThreshold}%. The buzzer will also sound at critical levels. You can adjust this in Settings > Safety Thresholds.',
                 ),
               ),

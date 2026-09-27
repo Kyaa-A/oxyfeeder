@@ -37,13 +37,6 @@ class SensorsViewModel extends ChangeNotifier {
     final voltage = 10.5 + (_currentStatus.batteryStatus / 100.0) * (14.4 - 10.5);
     return '${voltage.toStringAsFixed(1)}V';
   }
-  
-  /// Feed level raw value (simulated from percentage)
-  String get feedLoadCellRawValue {
-    // Simulate raw ADC value based on percentage (0-100% -> 0-4095)
-    final rawValue = (_currentStatus.feedLevel / 100.0 * 4095).toInt();
-    return rawValue.toString();
-  }
 
   /// Check if we're receiving live data
   bool get isReceivingData {

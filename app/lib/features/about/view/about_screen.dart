@@ -126,7 +126,7 @@ class AboutScreen extends StatelessWidget {
                 const _InfoRow(label: 'BLE Bridge', value: 'ESP32'),
                 const _InfoRow(label: 'Camera', value: 'ESP32-CAM'),
                 const _InfoRow(label: 'DO Sensor', value: 'DFRobot Analog'),
-                const _InfoRow(label: 'Load Cell', value: 'HX711 + 5kg Cell'),
+                const _InfoRow(label: 'Feed Sensor', value: 'HC-SR04 Ultrasonic'),
                 const _InfoRow(label: 'RTC', value: 'DS3231'),
                 const _InfoRow(label: 'GSM', value: 'SIM800L'),
               ]),
